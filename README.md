@@ -1,226 +1,158 @@
-# 婚禮 QR 姓名牌／報到系統
+# 婚禮 Google Sheet 條碼機報到系統
+
+目前版本在 `sheet-scanner-checkin` 分支，已使用 git 版控。
+
+這版的主要流程是：工作人員開 Google Sheet 站台頁，條碼機掃賓客 QR Code，Apps Script 自動把對應賓客改成 `已報到`。不需要前端、不需要手機掃描網頁。
 
 ## 架構
 
-- Google Sheet：保存賓客、工作人員、報到與禮金資料
-- Google Apps Script：提供報到網頁與寫入資料
-- QR Code：Sheet 掃描版使用隨機 Token；Web App 備援版使用帶 Token 的報到網址
-- Staff allow list：只允許指定 Google 帳號查詢與寫入賓客資料
-- GiftLog：每次報到或修改都追加紀錄，方便婚宴後對帳
-- Sheet 掃描版：不用前端，條碼機直接掃進 Google Sheet，由 Apps Script 自動寫入報到狀態
+- Google Sheet：賓客主檔、掃描輸入、報到紀錄與現場 Dashboard。
+- Google Apps Script：初始化工作表、處理 `onEdit` 掃描事件、寫回報到狀態。
+- 條碼機：像鍵盤一樣把 QR Token 輸入到站台頁。
+- QR Code：建議直接放 `QR_TOKEN`。若沿用舊 Web App URL，系統也會解析 `?t=TOKEN`。
+- Git：目前已有 initial commit 與掃描版 commit，可用分支保留不同方案。
+
+現有 `Index.html` 與 Web App 函式仍保留作為備援，但 README 以無前端 Sheet 掃描版為主。
+
+## Git 狀態
+
+目前分支：
+
+```text
+sheet-scanner-checkin
+```
+
+目前重要 commit：
+
+```text
+32f30ce Initial wedding check-in app
+a213731 Add sheet scanner check-in flow
+```
+
+如果要回到初始 Web App 版本，可切回或重設到 `32f30ce`。目前 `master` 和 `sheet-scanner-checkin` 仍指向同一個掃描版 commit。
+
+## 工作表
+
+執行 `setupSheet` 會建立或補齊以下工作表：
+
+- `Guests`：賓客主檔與最後報到狀態。
+- `Staff`：保留給 Web App 備援與人員資料。
+- `GiftLog`：保留給 Web App 儲存禮金與報到修改紀錄。
+- `ScanLog`：每一次條碼機掃描的總紀錄。
+- `Scan_入口A`：報到站台 A。
+- `Scan_入口B`：報到站台 B。
+- `Scan_備用`：備用報到站台。
+- `Dashboard`：現場統計。
+
+如果舊 Sheet 已經初始化過，只想補建掃描版工作表，執行 `setupScannerSheets`。
+
+## Guests 欄位
+
+`Guests` 是主要資料表，欄位如下：
+
+```text
+賓客ID
+QR_TOKEN
+顯示姓名
+邀請單位
+新郎/新娘方
+分組
+桌號
+預計人數
+實到人數
+報到狀態
+收禮狀態
+禮金金額
+紅包編號
+操作人員
+報到時間
+備註
+QR連結
+報到站台
+```
 
-這個版本不使用共用 PIN 作為主要安全機制。工作人員必須用列在 `Staff` 工作表中的 Google 帳號開啟報到系統。
+匯入賓客時可以先填：
 
-> 測速模式：目前程式已暫時關閉 Google 帳號 allow list 驗證，用來測試 QR 開啟後載入賓客資料的速度。這個模式下，任何能開啟 Web App 的人都可能查詢或寫入資料；正式使用前必須重新啟用驗證或改成個別工作人員代碼。
->
-> 測速時請將 Web App 部署為「以我執行」且「任何人」可存取。若仍部署為「以存取網頁應用程式的使用者身分執行」，Google 仍可能觸發帳號與授權跳轉，無法測到無登入版本的實際速度。
+- `顯示姓名`
+- `邀請單位`
+- `新郎/新娘方`
+- `分組`
+- `桌號`
+- `預計人數`
 
----
+接著執行 `generateIdsAndLinks`，系統會補上：
 
-## 1. 建立 Google Sheet
+- `賓客ID`
+- `QR_TOKEN`
+- `QR連結`，若有設定 `WEB_APP_URL`
 
-1. 新增一份 Google Sheet。
-2. 從網址複製試算表 ID。
-
-例如：
-
-`https://docs.google.com/spreadsheets/d/這一段就是ID/edit`
-
----
-
-## 2. 建立 Apps Script
-
-1. 在 Google Sheet 選擇「擴充功能 → Apps Script」。
-2. 將 `Code.gs` 內容貼入預設程式檔。
-3. 新增 HTML 檔案，命名為 `Index`。
-4. 將 `Index.html` 內容貼入。
-
----
-
-## 3. 設定指令碼屬性
+## ScanLog 欄位
 
-Apps Script 左側「專案設定」→「指令碼屬性」，新增：
+`ScanLog` 會記錄每一次掃描，不管成功或失敗：
 
-| 屬性 | 值 |
-|---|---|
-| SPREADSHEET_ID | 你的 Google Sheet ID |
-| WEB_APP_URL | 第一次部署後再填 |
+```text
+掃描時間
+站台
+掃描內容
+處理結果
+賓客ID
+顯示姓名
+桌號
+訊息
+操作人員
+```
 
-建議將 Apps Script 專案時區設為 `Asia/Taipei`，避免報到時間錯誤。
+常見處理結果：
 
----
+- `CHECKED_IN`：報到成功。
+- `ALREADY_CHECKED_IN`：重複掃描，不覆蓋原報到時間。
+- `NOT_FOUND`：找不到 QR Token。
+- `EMPTY_SCAN`：沒有掃描內容。
+- `ERROR`：處理時發生錯誤。
 
-## 4. 初始化工作表
+## 站台頁
 
-1. 回到 `Code.gs`。
-2. 從上方函式下拉選單選 `setupSheet`。
-3. 按「執行」。
-4. 第一次需授權 Apps Script 存取試算表。
+站台頁包含：
 
-系統會建立報到系統需要的工作表：
+```text
+掃描內容
+處理結果
+顯示姓名
+桌號
+訊息
+處理時間
+```
 
-- `Guests`：賓客主檔與最後報到狀態
-- `Staff`：可使用系統的 Google 帳號 allow list
-- `GiftLog`：每次儲存的追加紀錄
-- `ScanLog`：條碼機掃描總紀錄
-- `Scan_入口A`、`Scan_入口B`、`Scan_備用`：現場各報到站台的掃描輸入頁
-- `Dashboard`：報到數量總覽
+現場每個報到台請使用不同站台頁，例如：
 
-`Guests` 欄位：
+- 入口 A 使用 `Scan_入口A`
+- 入口 B 使用 `Scan_入口B`
+- 臨時支援使用 `Scan_備用`
 
-- 賓客ID
-- QR_TOKEN
-- 顯示姓名
-- 邀請單位
-- 新郎/新娘方
-- 分組
-- 桌號
-- 預計人數
-- 實到人數
-- 報到狀態
-- 收禮狀態
-- 禮金金額
-- 紅包編號
-- 操作人員
-- 報到時間
-- 備註
-- QR連結
-- 報到站台
+不要讓多台條碼機共用同一個站台頁，避免游標互搶。
 
-`Staff` 欄位：
+## Apps Script 設定
 
-- Email
-- 顯示名稱
-- 角色
-- 啟用狀態
-- 備註
+1. 新增或開啟 Google Sheet。
+2. 點選「擴充功能」→「Apps Script」。
+3. 將 `Code.gs` 貼到預設程式檔。
+4. 若要保留 Web App 備援，再新增 HTML 檔案 `Index`，貼上 `Index.html`。
+5. 到 Apps Script「專案設定」→「指令碼屬性」新增：
 
-`setupSheet` 會嘗試將目前執行者加入 `Staff`。正式使用前請確認所有工作人員都已列入 `Staff`，且 `啟用狀態` 填 `啟用`。
+```text
+SPREADSHEET_ID = Google Sheet ID
+WEB_APP_URL = Web App URL，可空白
+```
 
-`GiftLog` 欄位：
+建議將 Apps Script 專案時區設為 `Asia/Taipei`。
 
-- 紀錄時間
-- 動作
-- 賓客ID
-- QR_TOKEN
-- 顯示姓名
-- 桌號
-- 實到人數
-- 收禮狀態
-- 禮金金額
-- 紅包編號
-- 操作人員Email
-- 操作人員名稱
-- 備註
+第一次使用請執行 `setupSheet`。若只補掃描版，執行 `setupScannerSheets`。
 
-`ScanLog` 欄位：
+## QR Code
 
-- 掃描時間
-- 站台
-- 掃描內容
-- 處理結果
-- 賓客ID
-- 顯示姓名
-- 桌號
-- 訊息
-- 操作人員
+掃描版建議 QR Code 直接放 `QR_TOKEN`。
 
-站台頁欄位：
-
-- 掃描內容
-- 處理結果
-- 顯示姓名
-- 桌號
-- 訊息
-- 處理時間
-
-若已經初始化過舊版工作表，也可以只執行 `setupScannerSheets` 來補建掃描版需要的工作表。
-
----
-
-## 5. 分享 Sheet 權限給工作人員
-
-因為 Web App 要部署為「以使用者身分執行」，每位工作人員都需要：
-
-1. 有自己的 Google 帳號。
-2. 帳號列在 `Staff` 工作表。
-3. 有這份 Google Sheet 的存取權。
-4. 婚宴前至少完成一次開啟、授權、搜尋、儲存測試。
-
-如果工作人員帳號沒有 Sheet 權限，Web App 可能可以開啟，但查詢或寫入時會失敗。
-
-若使用無前端條碼機掃描版，工作人員不需要開 Web App，但必須有這份 Google Sheet 的編輯權限。掃描版的操作權限主要由 Google Sheet 分享權限控管，不再依賴 Web App 畫面的 allow list。
-
----
-
-## 6. 匯入賓客名單
-
-可直接將 `sample_guests.csv` 的內容貼入 `Guests`。
-
-建議：
-
-- 一個家庭／一組邀請只做一筆
-- `顯示姓名` 可填「王大明闔府」
-- `預計人數` 填整組總人數
-- 攜伴未確認姓名時寫「陳小美＋伴」
-
-先填：
-
-- 顯示姓名
-- 邀請單位
-- 新郎/新娘方
-- 分組
-- 桌號
-- 預計人數
-
-貼完後執行 `generateIdsAndLinks`，系統會建立賓客 ID 與隨機 Token。
-
----
-
-## 7. 部署 Web App
-
-Apps Script 右上「部署 → 新增部署作業」。
-
-設定：
-
-| 項目 | 選擇 |
-|---|---|
-| 類型 | 網頁應用程式 |
-| 執行身分 | 存取網頁應用程式的使用者 |
-| 誰可以存取 | 任何擁有 Google 帳戶的使用者 |
-
-部署後複製 Web App URL。
-
-接著：
-
-1. 將 URL 填入指令碼屬性 `WEB_APP_URL`
-2. 再執行一次 `generateIdsAndLinks`
-3. `QR連結` 欄就會產生每位賓客專屬網址
-
-每次修改 Apps Script 程式碼後，都要：
-
-「部署 → 管理部署作業 → 編輯 → 建立新版本」
-
----
-
-## 8. Google 帳號授權限制
-
-Apps Script Web App 有兩種常見執行方式：
-
-- 以部署者身分執行
-- 以存取網頁應用程式的使用者身分執行
-
-如果使用「以部署者身分執行」，`Session.getActiveUser().getEmail()` 在許多情境下無法可靠取得使用者 email，因此不能穩定做 Google 帳號 allow list。
-
-本系統使用「以存取網頁應用程式的使用者身分執行」，讓後端能用工作人員的 Google email 檢查 `Staff` allow list。
-
----
-
-## 9. 產生 QR Code
-
-### 條碼機掃描版
-
-若現場使用 Google Sheet 掃描版，QR Code 建議直接放 `QR_TOKEN`，不要放網址。最簡單可在 Google Sheet 新增一欄「QR圖片」，第二列使用：
+在 Google Sheet 新增一欄 `QR圖片`，第二列可使用：
 
 ```text
 =IMAGE("https://quickchart.io/qr?text="&ENCODEURL(B2)&"&size=220")
@@ -228,180 +160,80 @@ Apps Script Web App 有兩種常見執行方式：
 
 假設 `B2` 是 `QR_TOKEN`。
 
-條碼機請設定為「掃描後送出 Enter」，讓游標自動移到下一列。
-
-### Web App 備援版
-
-最簡單可在 Google Sheet 新增一欄「QR圖片」，第二列使用：
-
-```text
-=IMAGE("https://quickchart.io/qr?text="&ENCODEURL(Q2)&"&size=220")
-```
-
-假設 `Q2` 是 QR連結。若 `Guests` 已新增 `報到站台` 欄，`QR連結` 可能會在 `Q` 欄，請以實際欄位位置為準。
-
-注意：此方法使用第三方 QR 圖片服務。若不想讓網址送到第三方服務，可改用離線 QR 工具批次產生。
+注意：這個公式會使用第三方 QR 圖片服務。若不想把 token 傳給第三方，請改用離線 QR 工具批次產生。
 
 姓名牌建議顯示：
 
 - 顯示姓名
 - 桌號
 - QR Code
-- 人眼可讀賓客 ID，例如 G023
+- 人眼可讀賓客 ID，例如 `G023`
 - `請交由接待人員掃描`
-- `Staff check-in only`
 
-QR Code 最小建議 2.5 × 2.5 cm，四周保留白邊。
+QR Code 建議至少 2.5 x 2.5 cm，四周保留白邊。
 
----
+## 現場操作
 
-## 10. 無前端條碼機掃描版現場操作
+1. 工作人員用有編輯權限的 Google 帳號開啟 Sheet。
+2. 各報到台打開自己的站台頁，例如 `Scan_入口A`。
+3. 將游標放在第 2 列的 `掃描內容` 欄。
+4. 條碼機掃賓客 QR Code。
+5. 條碼機輸入 token 並送出 Enter。
+6. Apps Script 自動處理該列，站台頁會顯示處理結果、姓名、桌號與訊息。
+7. 下一位賓客繼續掃下一列。
 
-這個流程不需要開 Web App，也不需要手機相機。工作人員只要開 Google Sheet 的站台頁，條碼機像鍵盤一樣輸入 QR Token。
-
-1. 每個報到台各自開一張站台頁，例如：
-   - `Scan_入口A`
-   - `Scan_入口B`
-   - `Scan_備用`
-2. 將游標放在該站台頁第 2 列的 `掃描內容` 欄。
-3. 用條碼機掃賓客姓名牌 QR Code。
-4. 條碼機輸入 token 並送出 Enter 後，Apps Script 會自動處理。
-5. 站台頁同列會顯示：
-   - `CHECKED_IN`：報到成功
-   - `ALREADY_CHECKED_IN`：重複掃描，不覆蓋原報到時間
-   - `NOT_FOUND`：找不到此 QR Token
-   - `EMPTY_SCAN`：沒有掃描內容
-   - `ERROR`：處理時發生錯誤
-6. 每次掃描都會追加到 `ScanLog`。
-7. `Dashboard` 會顯示已報到組數、實到人數、重複掃描與找不到 QR 次數。
-
-掃描成功時，系統會自動更新 `Guests`：
+掃描成功時，系統會更新 `Guests`：
 
 - `報到狀態` 改為 `已報到`
-- `實到人數` 填入既有實到人數、預計人數或 1
+- `實到人數` 填既有實到人數、預計人數或 1
 - `收禮狀態` 若空白則填 `未收禮`
 - `操作人員` 填目前 Google 帳號 email，若無法取得則填 `unknown`
 - `報到時間` 填當下時間
 - `報到站台` 填站台頁名稱
 
-掃描版也支援舊 Web App QR 連結。若掃描內容是 `https://.../exec?t=TOKEN`，系統會自動解析 `t` 參數。
+每次掃描都會追加一筆到 `ScanLog`。
 
-## 11. Web App 備援版現場操作
+## 條碼機設定
 
-1. 工作人員用已授權 Google 帳號登入手機瀏覽器。
-2. 工作人員用手機相機掃 QR Code。
-3. 系統確認 Google 帳號在 `Staff` allow list。
-4. 系統顯示姓名、桌號、預計人數。
-5. 從 QR Code 進入時，系統會自動標記 `已報到`。
-6. 禮金資料可稍後補登：
-   - 實到人數
-   - 收禮狀態
-   - 禮金金額
-   - 紅包編號
-   - 備註
-7. 補完資料後按「完成報到」或「更新報到資料」。
+條碼機需要設定為：
 
-操作人員會自動使用 `Staff` 工作表中的顯示名稱，不需要手動輸入。
+- 掃描後送出 Enter。
+- 輸出純文字，不要加前後綴。
+- 若可設定鍵盤語系，建議與現場電腦輸入法一致。
 
-只有從 QR Code 連結進入時會自動報到。從姓名搜尋打開賓客資料時，不會自動改成已報到，避免單純查詢造成誤報到。
+婚宴前請用 10 筆假資料實測條碼機、Google Sheet、網路與多站台同時掃描。
 
-若重複掃描，系統會顯示既有報到資料，仍可更新。自動報到與每次手動儲存都會追加一筆 `GiftLog`。
+## 權限
 
-如果 QR Code 掃不到，可用姓名、賓客 ID、桌號或分組搜尋。
+掃描版主要靠 Google Sheet 分享權限控管。
 
----
+現場工作人員必須有這份 Google Sheet 的編輯權限。只要能編輯站台頁，就能觸發掃描報到。
 
-## 12. 收禮規則
+`Staff` allow list 目前主要保留給 Web App 備援流程；掃描版不依賴前端登入檢查。
 
-`收禮狀態` 可選：
+## 上線前測試
 
-- 未收禮
-- 已收禮
-- 代包
-- 免禮
+至少測以下情境：
 
-規則：
+1. 掃有效 token，`Guests` 更新為 `已報到`。
+2. 重複掃同一 token，站台頁顯示 `ALREADY_CHECKED_IN`，且不覆蓋原報到時間。
+3. 掃不存在 token，站台頁顯示 `NOT_FOUND`。
+4. 掃空白內容，站台頁顯示 `EMPTY_SCAN`。
+5. 掃舊 Web App URL，系統能解析 `?t=TOKEN`。
+6. `Scan_入口A` 與 `Scan_入口B` 同時掃不同賓客，都能成功寫回 `Guests`。
+7. `ScanLog` 每次掃描都有新增紀錄。
+8. `Dashboard` 統計數字正確。
+9. 沒有 Sheet 編輯權限的帳號無法操作。
 
-- 選 `已收禮` 或 `代包` 時，必須填 `紅包編號`。
-- 選 `未收禮` 或 `免禮` 時，系統會忽略禮金金額與紅包編號。
-- 禮金金額必須是 0 到 10,000,000 的整數。
-- 實到人數必須是 0 到 30 的整數。
+## 婚宴當天備援
 
----
+建議準備：
 
-## 13. 賓客自行掃碼時
-
-賓客或未授權帳號掃 QR Code 時，不會顯示賓客姓名、桌號或禮金資料。
-
-畫面會顯示：
-
-`請交由接待人員協助報到`
-
-如果帳號已登入但不在 `Staff` allow list，會顯示：
-
-`此帳號未授權使用報到系統`
-
----
-
-## 14. 上線前測試清單
-
-至少建立 10 筆假資料並測試：
-
-1. 一般單人賓客
-2. 兩人攜伴
-3. 家庭四人
-4. 同名賓客
-5. 代包
-6. 未收禮但先報到
-7. 免禮
-8. 重複掃碼
-9. 手動姓名搜尋
-10. 兩支手機同時操作
-11. allow list 外帳號無法查看資料
-12. 停用 Staff 後無法操作
-13. GiftLog 是否每次儲存都有新增紀錄
-14. `Scan_入口A` 掃有效 token，`Guests` 是否更新為已報到
-15. 重複掃同一個 token，是否顯示 `ALREADY_CHECKED_IN` 且不覆蓋原報到時間
-16. 掃不存在 token，是否顯示 `NOT_FOUND`
-17. `Scan_入口A` 與 `Scan_入口B` 同時掃描不同賓客，是否都成功寫回 `Guests`
-18. `ScanLog` 是否保留每一次掃描紀錄
-
-婚宴當天需準備：
-
-- 2 支主要手機或平板
-- 1 支備用裝置
-- 每支裝置登入已授權 Google 帳號
-- 行動電源
-- 紙本賓客名單
-- 空白姓名牌
-- 備用網路
-- 紅包編號貼紙
-- 至少一個備援 Google 帳號
-
----
-
-## 15. 建議先完成的 MVP
-
-第一階段只完成：
-
-- QR 掃描
-- Google 帳號 allow list
-- 掃 QR 自動標記報到成功
-- 自動帶出姓名與桌號
-- 實到人數
-- 報到狀態
-- 收禮狀態
-- 禮金金額
-- 紅包編號
-- 姓名搜尋
-- GiftLog 追加紀錄
-
-先不要做：
-
-- 自動排桌
-- 即時座位圖
-- LINE 通知
-- 賓客自拍上傳
-- 多層角色權限管理
-
-先以 10 筆假資料跑完整流程，再匯入正式名單。
+- 至少 2 台報到裝置。
+- 至少 1 台備用裝置。
+- 條碼機備品或手機掃描備援。
+- 行動電源。
+- 備用網路。
+- 紙本賓客名單。
+- 人眼可讀賓客 ID。
+- 紅包編號貼紙。
