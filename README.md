@@ -148,6 +148,94 @@ WEB_APP_URL = Web App URL，可空白
 
 第一次使用請執行 `setupSheet`。若只補掃描版，執行 `setupScannerSheets`。
 
+## 部署設定流程
+
+這版的正式流程不需要部署 Web App。Apps Script 必須綁定在 Google Sheet 上，`onEdit(e)` 會在站台頁被編輯時自動執行。
+
+### 1. 取得目前版本
+
+從 GitHub 使用 `sheet-scanner-checkin` 分支：
+
+```text
+https://github.com/mickeylin/wedding-check-in/tree/sheet-scanner-checkin
+```
+
+需要貼到 Apps Script 的檔案：
+
+- `Code.gs`
+- `Index.html`，只有要保留 Web App 備援時才需要
+
+### 2. 建立或更新 Apps Script
+
+1. 開啟正式使用的 Google Sheet。
+2. 點選「擴充功能」→「Apps Script」。
+3. 將 `Code.gs` 的內容貼到 Apps Script 的 `Code.gs`。
+4. 儲存專案。
+5. 若要保留 Web App 備援，新增 HTML 檔案 `Index`，貼上 `Index.html`。
+
+### 3. 設定指令碼屬性
+
+到 Apps Script「專案設定」→「指令碼屬性」新增：
+
+```text
+SPREADSHEET_ID = Google Sheet ID
+WEB_APP_URL = 空白即可，除非要部署 Web App 備援
+```
+
+Google Sheet ID 是網址中 `/d/` 後面、`/edit` 前面的那段。
+
+### 4. 初始化工作表
+
+1. 在 Apps Script 上方函式選單選 `setupSheet`。
+2. 按「執行」。
+3. 第一次執行會要求授權，使用 Sheet 擁有者或管理者帳號授權。
+4. 回到 Google Sheet，確認已建立：
+   - `Guests`
+   - `ScanLog`
+   - `Scan_入口A`
+   - `Scan_入口B`
+   - `Scan_備用`
+   - `Dashboard`
+
+如果這份 Sheet 已經有舊版資料，只需要補掃描版工作表，可執行 `setupScannerSheets`。
+
+### 5. 匯入賓客並產生 Token
+
+1. 將正式賓客資料貼到 `Guests`。
+2. 至少填好 `顯示姓名`、`桌號`、`預計人數`。
+3. 在 Apps Script 執行 `generateIdsAndLinks`。
+4. 確認 `賓客ID` 與 `QR_TOKEN` 已產生。
+
+掃描版 QR Code 建議使用 `QR_TOKEN` 欄，不需要使用 `QR連結`。
+
+### 6. 測試 onEdit 掃描流程
+
+1. 複製任一筆 `Guests` 的 `QR_TOKEN`。
+2. 貼到 `Scan_入口A` 第 2 列的 `掃描內容`。
+3. 按 Enter。
+4. 確認同列出現 `CHECKED_IN`、姓名與桌號。
+5. 確認 `Guests` 該筆資料已更新為 `已報到`。
+6. 確認 `ScanLog` 追加一筆紀錄。
+
+若站台頁沒有反應，請確認：
+
+- Apps Script 已儲存最新版 `Code.gs`。
+- 使用者有 Google Sheet 編輯權限。
+- 編輯的是 `Scan_入口A`、`Scan_入口B` 或 `Scan_備用` 的第 1 欄。
+- 第一次已手動執行過 `setupSheet` 或 `setupScannerSheets` 並完成授權。
+
+### 7. Web App 備援，可選
+
+只有需要手機掃網址備援時才需要部署 Web App。
+
+1. Apps Script 右上「部署」→「新增部署作業」。
+2. 類型選「網頁應用程式」。
+3. 複製 Web App URL。
+4. 將 URL 填入指令碼屬性 `WEB_APP_URL`。
+5. 再執行一次 `generateIdsAndLinks`。
+
+條碼機掃描版不需要這一步。
+
 ## QR Code
 
 掃描版建議 QR Code 直接放 `QR_TOKEN`。
