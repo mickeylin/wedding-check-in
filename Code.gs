@@ -15,7 +15,8 @@ const GUEST_HEADERS = [
   '操作人員',
   '報到時間',
   '備註',
-  'QR連結'
+  'QR連結',
+  '報到站台'
 ];
 
 const STAFF_HEADERS = [
@@ -41,6 +42,29 @@ const GIFT_LOG_HEADERS = [
   '操作人員名稱',
   '備註'
 ];
+
+const SCAN_LOG_HEADERS = [
+  '掃描時間',
+  '站台',
+  '掃描內容',
+  '處理結果',
+  '賓客ID',
+  '顯示姓名',
+  '桌號',
+  '訊息',
+  '操作人員'
+];
+
+const SCAN_STATION_HEADERS = [
+  '掃描內容',
+  '處理結果',
+  '顯示姓名',
+  '桌號',
+  '訊息',
+  '處理時間'
+];
+
+const SCAN_STATION_SHEETS = ['Scan_入口A', 'Scan_入口B', 'Scan_備用'];
 
 const ALLOWED_GIFT_STATUS = ['未收禮', '已收禮', '代包', '免禮'];
 const GIFT_STATUS_REQUIRES_ENVELOPE = ['已收禮', '代包'];
@@ -83,6 +107,7 @@ function setupSheet() {
   const guestSheet = ensureSheet_(ss, 'Guests', GUEST_HEADERS);
   const staffSheet = ensureSheet_(ss, 'Staff', STAFF_HEADERS);
   const giftLogSheet = ensureSheet_(ss, 'GiftLog', GIFT_LOG_HEADERS);
+  const scanLogSheet = ensureSheet_(ss, 'ScanLog', SCAN_LOG_HEADERS);
 
   guestSheet.setFrozenRows(1);
   guestSheet.getRange('H:I').setNumberFormat('0');
@@ -106,7 +131,60 @@ function setupSheet() {
   giftLogSheet.getRange('I:I').setNumberFormat('#,##0');
   giftLogSheet.autoResizeColumns(1, GIFT_LOG_HEADERS.length);
 
+  scanLogSheet.setFrozenRows(1);
+  scanLogSheet.getRange('A:A').setNumberFormat('yyyy/mm/dd hh:mm:ss');
+  scanLogSheet.autoResizeColumns(1, SCAN_LOG_HEADERS.length);
+
+  setupScanStationSheets_(ss);
+  setupDashboard_(ss);
+
   return '工作表初始化完成';
+}
+
+/**
+ * 可單獨執行，用來補建無前端條碼機掃描版所需工作表。
+ */
+function setupScannerSheets() {
+  const ss = getSpreadsheet_();
+  ensureSheet_(ss, 'Guests', GUEST_HEADERS);
+  const scanLogSheet = ensureSheet_(ss, 'ScanLog', SCAN_LOG_HEADERS);
+  scanLogSheet.setFrozenRows(1);
+  scanLogSheet.getRange('A:A').setNumberFormat('yyyy/mm/dd hh:mm:ss');
+  scanLogSheet.autoResizeColumns(1, SCAN_LOG_HEADERS.length);
+  setupScanStationSheets_(ss);
+  setupDashboard_(ss);
+  return '掃描版工作表初始化完成';
+}
+
+function setupScanStationSheets_(ss) {
+  SCAN_STATION_SHEETS.forEach(name => {
+    const sheet = ensureSheet_(ss, name, SCAN_STATION_HEADERS);
+    sheet.setFrozenRows(1);
+    sheet.getRange('F:F').setNumberFormat('yyyy/mm/dd hh:mm:ss');
+    sheet.setColumnWidth(1, 220);
+    sheet.setColumnWidth(2, 150);
+    sheet.setColumnWidth(3, 180);
+    sheet.setColumnWidth(4, 80);
+    sheet.setColumnWidth(5, 260);
+    sheet.setColumnWidth(6, 160);
+  });
+}
+
+function setupDashboard_(ss) {
+  const sheet = ss.getSheetByName('Dashboard') || ss.insertSheet('Dashboard');
+  sheet.clear();
+  sheet.getRange(1, 1, 8, 2).setValues([
+    ['項目', '數值'],
+    ['總組數', '=COUNTA(Guests!C2:C)'],
+    ['已報到組數', '=COUNTIF(Guests!J2:J,"已報到")'],
+    ['未報到組數', '=COUNTIFS(Guests!C2:C,"<>",Guests!J2:J,"<>已報到")'],
+    ['總預計人數', '=SUM(Guests!H2:H)'],
+    ['實到人數', '=SUM(Guests!I2:I)'],
+    ['重複掃描次數', '=COUNTIF(ScanLog!D2:D,"ALREADY_CHECKED_IN")'],
+    ['找不到 QR 次數', '=COUNTIF(ScanLog!D2:D,"NOT_FOUND")']
+  ]);
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, 2);
 }
 
 /**
@@ -272,6 +350,184 @@ function saveCheckin(payload) {
   }
 }
 
+function onEdit(e) {
+  handleScanEdit_(e);
+}
+
+function handleScanEdit_(e) {
+  if (!e || !e.range) return;
+
+  const range = e.range;
+  const sheet = range.getSheet();
+  const stationName = sheet.getName();
+
+  if (!SCAN_STATION_SHEETS.includes(stationName)) return;
+  if (range.getRow() < 2 || range.getColumn() !== 1) return;
+  if (range.getNumRows() !== 1 || range.getNumColumns() !== 1) return;
+
+  const rawScan = String(range.getValue() || '').trim();
+  const now = new Date();
+  const operator = getScanOperator_();
+  const ss = e.source || getSpreadsheet_();
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+
+  try {
+    const result = processScan_(ss, stationName, rawScan, now, operator);
+    writeScanStationResult_(sheet, range.getRow(), result, now);
+    appendScanLog_(ss, stationName, rawScan, result, operator, now);
+  } catch (err) {
+    const result = {
+      status: 'ERROR',
+      guestId: '',
+      displayName: '',
+      tableNo: '',
+      message: err && err.message ? err.message : String(err)
+    };
+    writeScanStationResult_(sheet, range.getRow(), result, now);
+    appendScanLog_(ss, stationName, rawScan, result, operator, now);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function processScan_(ss, stationName, rawScan, now, operator) {
+  const token = extractTokenFromScan_(rawScan);
+  if (!token) {
+    return {
+      status: 'EMPTY_SCAN',
+      guestId: '',
+      displayName: '',
+      tableNo: '',
+      message: '沒有掃描內容'
+    };
+  }
+
+  const result = findGuestByTokenInSpreadsheet_(ss, token);
+  if (!result) {
+    return {
+      status: 'NOT_FOUND',
+      guestId: '',
+      displayName: '',
+      tableNo: '',
+      message: `找不到 QR Token：${token}`
+    };
+  }
+
+  const { sheet, rowNumber, row, map } = result;
+  const wasCheckedIn = String(row[map['報到狀態']] || '').trim() === '已報到';
+  const guestId = String(row[map['賓客ID']] || '');
+  const displayName = String(row[map['顯示姓名']] || '');
+  const tableNo = String(row[map['桌號']] || '');
+
+  if (wasCheckedIn) {
+    const checkinTime = formatDate_(row[map['報到時間']]);
+    return {
+      status: 'ALREADY_CHECKED_IN',
+      guestId,
+      displayName,
+      tableNo,
+      message: checkinTime ? `已報到，原報到時間：${checkinTime}` : '已報到'
+    };
+  }
+
+  const existingActualCount = Number(row[map['實到人數']] || 0);
+  const expectedCount = Number(row[map['預計人數']] || 0);
+  row[map['實到人數']] = existingActualCount || expectedCount || 1;
+  row[map['報到狀態']] = '已報到';
+  row[map['收禮狀態']] = String(row[map['收禮狀態']] || '未收禮') || '未收禮';
+  row[map['操作人員']] = operator;
+  row[map['報到時間']] = now;
+  row[map['報到站台']] = stationName;
+
+  sheet.getRange(rowNumber, 1, 1, GUEST_HEADERS.length)
+    .setValues([row.slice(0, GUEST_HEADERS.length)]);
+
+  return {
+    status: 'CHECKED_IN',
+    guestId,
+    displayName,
+    tableNo,
+    message: '報到成功'
+  };
+}
+
+function writeScanStationResult_(sheet, rowNumber, result, now) {
+  sheet.getRange(rowNumber, 2, 1, 5).setValues([[
+    result.status,
+    result.displayName,
+    result.tableNo,
+    result.message,
+    now
+  ]]);
+
+  const colorMap = {
+    CHECKED_IN: '#dff3e4',
+    ALREADY_CHECKED_IN: '#fff6d9',
+    NOT_FOUND: '#f8d7da',
+    EMPTY_SCAN: '#eeeeee',
+    ERROR: '#f8d7da'
+  };
+  sheet.getRange(rowNumber, 1, 1, SCAN_STATION_HEADERS.length)
+    .setBackground(colorMap[result.status] || '#ffffff');
+}
+
+function appendScanLog_(ss, stationName, rawScan, result, operator, now) {
+  const sheet = ensureSheet_(ss, 'ScanLog', SCAN_LOG_HEADERS);
+  sheet.appendRow([
+    now,
+    stationName,
+    rawScan,
+    result.status,
+    result.guestId,
+    result.displayName,
+    result.tableNo,
+    result.message,
+    operator
+  ]);
+}
+
+function findGuestByTokenInSpreadsheet_(ss, token) {
+  const sheet = ensureSheet_(ss, 'Guests', GUEST_HEADERS);
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return null;
+
+  const map = headerMap_(values[0], GUEST_HEADERS);
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][map['QR_TOKEN']] || '').trim() === token) {
+      return {
+        sheet,
+        rowNumber: i + 1,
+        row: values[i],
+        map
+      };
+    }
+  }
+  return null;
+}
+
+function extractTokenFromScan_(rawScan) {
+  const value = String(rawScan || '').trim();
+  if (!value) return '';
+
+  const tokenMatch = value.match(/[?&]t=([^&#]+)/);
+  if (tokenMatch) {
+    return decodeURIComponent(tokenMatch[1]).trim();
+  }
+
+  return value;
+}
+
+function getScanOperator_() {
+  try {
+    const email = getEffectiveEmail_();
+    return email || 'unknown';
+  } catch (err) {
+    return 'unknown';
+  }
+}
+
 function getGuestSheet_() {
   return ensureSheet_(getSpreadsheet_(), 'Guests', GUEST_HEADERS);
 }
@@ -412,6 +668,7 @@ function guestObject_(row, map) {
     envelopeNo: String(row[map['紅包編號']] || ''),
     operator: String(row[map['操作人員']] || ''),
     checkinTime: formatDate_(row[map['報到時間']]),
+    checkinStation: map['報到站台'] === undefined ? '' : String(row[map['報到站台']] || ''),
     notes: String(row[map['備註']] || '')
   };
 }
