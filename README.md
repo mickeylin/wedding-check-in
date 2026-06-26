@@ -1,54 +1,47 @@
-# 婚禮 Google Sheet 條碼機報到系統
+# 婚禮 GitHub Pages 掃描報到系統
 
-目前版本在 `sheet-scanner-checkin` 分支，已使用 git 版控。
+目前版本在 `github-pages-api` 分支。
 
-這版是純 Google Sheet 條碼機報到流程：
+這版提供「手機瀏覽器連續掃 QR」流程：
 
-- 不需要前端
-- 不需要 Web App
-- 不需要 QR 連結
-- QR Code 只放 `QR_TOKEN`
+- GitHub Pages：工作人員掃描頁，使用手機相機讀 QR Code。
+- Apps Script Web App：API 後端，驗證 PIN 後更新 Google Sheet。
+- Google Sheet：保存賓客主檔、報到狀態、掃描紀錄與 Dashboard。
+- QR Code：建議印 GitHub Pages 穩定網址，並用 `?t=QR_TOKEN` 帶 token。
 
-工作人員開 Google Sheet 站台頁，條碼機掃賓客 QR Code，Apps Script 透過 `onEdit(e)` 自動把對應賓客改成 `已報到`。
+同一組 QR Code 婚禮後仍可沿用：把 GitHub Pages 改成照片頁、感謝頁或彩蛋頁即可。
 
-## 架構
-
-- Google Sheet：賓客主檔、掃描輸入、掃描紀錄與 Dashboard。
-- Google Apps Script：初始化工作表、處理掃描輸入、寫回報到狀態。
-- 條碼機：像鍵盤一樣把 QR Token 輸入到站台頁。
-- Git：保留版本歷史與分支。
-
-## Git 狀態
-
-目前主要分支：
+## 工作流程
 
 ```text
-sheet-scanner-checkin
+GitHub Pages 掃描頁
+  -> 掃到 QR Code
+  -> 取出 t=QR_TOKEN
+  -> JSONP 呼叫 Apps Script Web App API
+  -> Apps Script 更新 Guests / ScanLog
+  -> GitHub Pages 顯示報到結果
 ```
 
-重要 commit：
+前端預設使用 JSONP 呼叫 Apps Script，避免 GitHub Pages 直接 `fetch()` Apps Script 時遇到 CORS 限制。
 
-```text
-32f30ce Initial wedding check-in app
-a213731 Add sheet scanner check-in flow
-543df86 Update README for sheet scanner branch
-a356562 Document scanner deployment setup
-```
+## 檔案
+
+- `Code.gs`：Apps Script 後端，包含 Sheet 初始化、`onEdit` 條碼機流程、`doGet`/`doPost` API。
+- `docs/index.html`：GitHub Pages 掃描頁。
+- `docs/app.js`：相機掃描、PIN 設定、API 呼叫與結果顯示。
+- `docs/styles.css`：掃描頁樣式。
+- `sample_guests.csv`：賓客資料範例。
 
 ## 工作表
 
-執行 `setupSheet` 會建立或補齊以下工作表：
+執行 `setupSheet` 會建立或補齊：
 
 - `Guests`：賓客主檔與最後報到狀態。
-- `ScanLog`：每一次條碼機掃描的總紀錄。
-- `Scan_入口A`：報到站台 A。
-- `Scan_入口B`：報到站台 B。
-- `Scan_備用`：備用報到站台。
+- `ScanLog`：每一次掃描紀錄。
+- `Scan_入口A`、`Scan_入口B`、`Scan_備用`：保留給條碼機掃描備援。
 - `Dashboard`：現場統計。
 
-## Guests 欄位
-
-`Guests` 是主要資料表，欄位如下：
+`Guests` 欄位：
 
 ```text
 賓客ID
@@ -67,208 +60,170 @@ QR_TOKEN
 備註
 ```
 
-匯入賓客時可以先填：
+## Apps Script 後端部署
 
-- `顯示姓名`
-- `邀請單位`
-- `新郎/新娘方`
-- `分組`
-- `桌號`
-- `預計人數`
-
-接著執行 `generateGuestTokens`，系統會補上：
-
-- `賓客ID`
-- `QR_TOKEN`
-
-## ScanLog 欄位
-
-`ScanLog` 會記錄每一次掃描，不管成功或失敗：
-
-```text
-掃描時間
-站台
-掃描內容
-處理結果
-賓客ID
-顯示姓名
-桌號
-訊息
-操作人員
-```
-
-常見處理結果：
-
-- `CHECKED_IN`：報到成功。
-- `ALREADY_CHECKED_IN`：重複掃描，不覆蓋原報到時間。
-- `NOT_FOUND`：找不到 QR Token。
-- `EMPTY_SCAN`：沒有掃描內容。
-- `ERROR`：處理時發生錯誤。
-
-## 站台頁
-
-站台頁包含：
-
-```text
-掃描內容
-處理結果
-顯示姓名
-桌號
-訊息
-處理時間
-```
-
-現場每個報到台請使用不同站台頁，例如：
-
-- 入口 A 使用 `Scan_入口A`
-- 入口 B 使用 `Scan_入口B`
-- 臨時支援使用 `Scan_備用`
-
-不要讓多台條碼機共用同一個站台頁，避免游標互搶。
-
-## 部署設定流程
-
-這版不需要 Web App 部署。Apps Script 綁定在 Google Sheet 上即可。
-
-### 1. 取得目前版本
-
-從 GitHub 使用 `sheet-scanner-checkin` 分支：
-
-```text
-https://github.com/mickeylin/wedding-check-in/tree/sheet-scanner-checkin
-```
-
-只需要貼到 Apps Script 的檔案：
-
-```text
-Code.gs
-```
-
-### 2. 建立或更新 Apps Script
+### 1. 建立或更新 Apps Script
 
 1. 開啟正式使用的 Google Sheet。
 2. 點選「擴充功能」→「Apps Script」。
-3. 將 `Code.gs` 的內容貼到 Apps Script 的 `Code.gs`。
+3. 將 `Code.gs` 貼到 Apps Script 的 `Code.gs`。
 4. 儲存專案。
 5. 建議將 Apps Script 專案時區設為 `Asia/Taipei`。
 
-### 3. 初始化工作表
+### 2. 設定指令碼屬性
+
+到 Apps Script「專案設定」→「指令碼屬性」新增：
+
+```text
+API_PIN = 現場工作人員使用的 PIN
+SPREADSHEET_ID = Google Sheet ID
+```
+
+`API_PIN` 不要寫進 GitHub Pages 程式碼。工作人員在掃描頁第一次使用時輸入，瀏覽器會存在該裝置的 localStorage。
+
+`SPREADSHEET_ID` 是 Google Sheet 網址中 `/d/` 後面、`/edit` 前面的那段。若 Apps Script 是綁定在該 Sheet 上，通常也能直接取得 active spreadsheet；設定此值是為了 Web App 執行環境更穩。
+
+### 3. 初始化 Sheet
 
 1. 在 Apps Script 上方函式選單選 `setupSheet`。
 2. 按「執行」。
 3. 第一次執行會要求授權，使用 Sheet 擁有者或管理者帳號授權。
-4. 回到 Google Sheet，確認已建立：
-   - `Guests`
-   - `ScanLog`
-   - `Scan_入口A`
-   - `Scan_入口B`
-   - `Scan_備用`
-   - `Dashboard`
+4. 回到 Sheet，確認 `Guests`、`ScanLog`、站台頁與 `Dashboard` 都已建立。
 
-### 4. 匯入賓客並產生 Token
+### 4. 產生賓客 Token
 
 1. 將正式賓客資料貼到 `Guests`。
 2. 至少填好 `顯示姓名`、`桌號`、`預計人數`。
 3. 在 Apps Script 執行 `generateGuestTokens`。
 4. 確認 `賓客ID` 與 `QR_TOKEN` 已產生。
 
-### 5. 測試掃描流程
+### 5. 部署 Web App API
 
-1. 複製任一筆 `Guests` 的 `QR_TOKEN`。
-2. 貼到 `Scan_入口A` 第 2 列的 `掃描內容`。
-3. 按 Enter。
-4. 確認同列出現 `CHECKED_IN`、姓名與桌號。
-5. 確認 `Guests` 該筆資料已更新為 `已報到`。
-6. 確認 `ScanLog` 追加一筆紀錄。
+1. Apps Script 右上「部署」→「新增部署作業」。
+2. 類型選「網頁應用程式」。
+3. 執行身分選「我」。
+4. 存取權選「任何人」或「知道連結的任何人」，依 Google 介面提供的選項為準。
+5. 部署後複製 Web App URL，格式類似：
 
-若站台頁沒有反應，請確認：
+```text
+https://script.google.com/macros/s/.../exec
+```
 
-- Apps Script 已儲存最新版 `Code.gs`。
-- 使用者有 Google Sheet 編輯權限。
-- 編輯的是 `Scan_入口A`、`Scan_入口B` 或 `Scan_備用` 的第 1 欄。
-- 第一次已手動執行過 `setupSheet` 並完成授權。
+這個 URL 要填到 GitHub Pages 掃描頁的 `Apps Script API URL`。
+
+## GitHub Pages 部署
+
+本分支的靜態前端放在 `docs/`。
+
+1. 到 GitHub repo 的 Settings。
+2. 進入 Pages。
+3. Source 選 `Deploy from a branch`。
+4. Branch 選 `github-pages-api`。
+5. Folder 選 `/docs`。
+6. 儲存後等待 GitHub Pages 完成部署。
+
+掃描頁網址會類似：
+
+```text
+https://mickeylin.github.io/wedding-check-in/
+```
 
 ## QR Code
 
-QR Code 直接放 `QR_TOKEN`，不要放網址。
-
-在 Google Sheet 新增一欄 `QR圖片`，第二列可使用：
+建議 QR Code 印 GitHub Pages 穩定網址：
 
 ```text
-=IMAGE("https://quickchart.io/qr?text="&ENCODEURL(B2)&"&size=220")
+https://mickeylin.github.io/wedding-check-in/?t=QR_TOKEN
 ```
 
-假設 `B2` 是 `QR_TOKEN`。
+若 `B2` 是 `QR_TOKEN`，可在 Sheet 新增 `QR網址` 欄：
 
-注意：這個公式會使用第三方 QR 圖片服務。若不想把 token 傳給第三方，請改用離線 QR 工具批次產生。
+```text
+="https://mickeylin.github.io/wedding-check-in/?t="&ENCODEURL(B2)
+```
 
-姓名牌建議顯示：
+再用 `QR網址` 產生 QR 圖片：
 
-- 顯示姓名
-- 桌號
-- QR Code
-- 人眼可讀賓客 ID，例如 `G023`
-- `請交由接待人員掃描`
+```text
+=IMAGE("https://quickchart.io/qr?text="&ENCODEURL(你的QR網址儲存格)&"&size=220")
+```
 
-QR Code 建議至少 2.5 x 2.5 cm，四周保留白邊。
+注意：這個公式會使用第三方 QR 圖片服務。若不想把網址傳給第三方，請改用離線 QR 工具批次產生。
 
 ## 現場操作
 
-1. 工作人員用有編輯權限的 Google 帳號開啟 Sheet。
-2. 各報到台打開自己的站台頁，例如 `Scan_入口A`。
-3. 將游標放在第 2 列的 `掃描內容` 欄。
-4. 條碼機掃賓客 QR Code。
-5. 條碼機輸入 token 並送出 Enter。
-6. Apps Script 自動處理該列，站台頁會顯示處理結果、姓名、桌號與訊息。
-7. 下一位賓客繼續掃下一列。
+1. 工作人員用手機開 GitHub Pages 掃描頁。
+2. 貼上 Apps Script API URL。
+3. 輸入工作人員 PIN。
+4. 輸入站台與操作人員名稱。
+5. 按「儲存設定」。
+6. 按「開始掃描」並允許相機權限。
+7. 掃到 QR 後，頁面會顯示報到成功、重複報到或找不到 token。
 
-掃描成功時，系統會更新 `Guests`：
+掃描成功時，Apps Script 會更新 `Guests`：
 
 - `報到狀態` 改為 `已報到`
 - `實到人數` 填既有實到人數、預計人數或 1
-- `操作人員` 填目前 Google 帳號 email，若無法取得則填 `unknown`
+- `操作人員` 填掃描頁輸入的操作人員
 - `報到時間` 填當下時間
-- `報到站台` 填站台頁名稱
+- `報到站台` 填掃描頁輸入的站台
 
-每次掃描都會追加一筆到 `ScanLog`。
+每次 API 掃描都會追加一筆到 `ScanLog`。
 
-## 條碼機設定
+## API
 
-條碼機需要設定為：
+GitHub Pages 預設使用 JSONP：
 
-- 掃描後送出 Enter。
-- 輸出純文字，不要加前後綴。
-- 若可設定鍵盤語系，建議與現場電腦輸入法一致。
+```text
+GET WEB_APP_URL?action=checkin&token=...&pin=...&station=...&operator=...&callback=...
+```
 
-婚宴前請用 10 筆假資料實測條碼機、Google Sheet、網路與多站台同時掃描。
+Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 CORS 的後端：
 
-## 權限
+```json
+{
+  "action": "checkin",
+  "token": "QR_TOKEN",
+  "pin": "工作人員PIN",
+  "station": "入口A",
+  "operator": "小美"
+}
+```
 
-掃描版主要靠 Google Sheet 分享權限控管。
+回傳：
 
-現場工作人員必須有這份 Google Sheet 的編輯權限。只要能編輯站台頁，就能觸發掃描報到。
+```json
+{
+  "ok": true,
+  "status": "CHECKED_IN",
+  "guestId": "G023",
+  "displayName": "王大明闔府",
+  "tableNo": "8",
+  "message": "報到成功",
+  "processedAt": "2026/06/27 18:30:00"
+}
+```
 
 ## 上線前測試
 
 至少測以下情境：
 
-1. 掃有效 token，`Guests` 更新為 `已報到`。
-2. 重複掃同一 token，站台頁顯示 `ALREADY_CHECKED_IN`，且不覆蓋原報到時間。
-3. 掃不存在 token，站台頁顯示 `NOT_FOUND`。
-4. 掃空白內容，站台頁顯示 `EMPTY_SCAN`。
-5. `Scan_入口A` 與 `Scan_入口B` 同時掃不同賓客，都能成功寫回 `Guests`。
+1. GitHub Pages 能開啟並啟動相機。
+2. API URL 與 PIN 設定後可成功掃有效 QR。
+3. 掃有效 token，`Guests` 更新為 `已報到`。
+4. 重複掃同一 token，頁面顯示 `ALREADY_CHECKED_IN`，且不覆蓋原報到時間。
+5. 掃不存在 token，頁面顯示 `NOT_FOUND`。
 6. `ScanLog` 每次掃描都有新增紀錄。
-7. `Dashboard` 統計數字正確。
-8. 沒有 Sheet 編輯權限的帳號無法操作。
+7. 兩台手機同時掃不同賓客，都能成功寫回 `Guests`。
+8. PIN 錯誤時不會更新 Sheet。
 
-## 婚宴當天備援
+## 安全注意事項
 
-建議準備：
+- `API_PIN` 是現場操作防線，不是高強度帳號系統。
+- 不要把 PIN 寫死在 `docs/app.js` 或公開文件。
+- 婚宴結束後建議更換或刪除 `API_PIN`。
+- 若 GitHub Pages 改成婚後彩蛋頁，請同步停用或改版 Apps Script API，避免舊 PIN 繼續可用。
 
-- 至少 2 台報到裝置。
-- 至少 1 台備用裝置。
-- 條碼機備品。
-- 行動電源。
-- 備用網路。
-- 紙本賓客名單。
-- 人眼可讀賓客 ID。
+## 條碼機備援
+
+這個分支仍保留 Google Sheet 站台頁 `onEdit` 流程。若手機掃描頁臨時出問題，可以改用條碼機掃到 `Scan_入口A` 的 `掃描內容` 欄。

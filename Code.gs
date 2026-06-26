@@ -37,9 +37,10 @@ const SCAN_STATION_HEADERS = [
 ];
 
 const SCAN_STATION_SHEETS = ['Scan_入口A', 'Scan_入口B', 'Scan_備用'];
+const API_STATION_NAME = 'GitHubPages';
 
 /**
- * 第一次使用時執行，建立純 Google Sheet 條碼機報到流程需要的工作表。
+ * 第一次使用時執行，建立手機掃描與條碼機備援共用的工作表。
  */
 function setupSheet() {
   const ss = getSpreadsheet_();
@@ -94,7 +95,7 @@ function setupDashboard_(ss) {
 
 /**
  * 對已有姓名的資料列補上賓客 ID 與隨機 QR_TOKEN。
- * QR Code 請直接使用 QR_TOKEN，不需要 Web App URL。
+ * QR Code 可使用 GitHub Pages 穩定網址並以 t 參數帶入 QR_TOKEN。
  */
 function generateGuestTokens() {
   const sheet = getGuestSheet_();
@@ -122,6 +123,46 @@ function generateGuestTokens() {
     .setValues(values.slice(1).map(row => row.slice(0, GUEST_HEADERS.length)));
 
   return `已處理 ${changed} 筆資料`;
+}
+
+function doPost(e) {
+  const now = new Date();
+  try {
+    const payload = parseApiPayload_(e);
+    return jsonResponse_(handleApiCheckin_(payload, now));
+  } catch (err) {
+    return jsonResponse_({
+      ok: false,
+      status: 'ERROR',
+      message: err && err.message ? err.message : String(err),
+      processedAt: formatDate_(now)
+    });
+  }
+}
+
+function doGet(e) {
+  const now = new Date();
+  const params = e && e.parameter ? e.parameter : {};
+
+  if (params.action === 'checkin') {
+    const payload = {
+      action: 'checkin',
+      token: String(params.token || params.t || '').trim(),
+      pin: String(params.pin || '').trim(),
+      operator: String(params.operator || '').trim(),
+      station: String(params.station || '').trim()
+    };
+    const body = safeApiCall_(payload, now);
+    return params.callback
+      ? jsonpResponse_(params.callback, body)
+      : jsonResponse_(body);
+  }
+
+  return jsonResponse_({
+    ok: true,
+    service: 'wedding-check-in-api',
+    message: 'API is running'
+  });
 }
 
 function onEdit(e) {
@@ -167,7 +208,7 @@ function handleScanEdit_(e) {
 }
 
 function processScan_(ss, stationName, rawScan, now, operator) {
-  const token = String(rawScan || '').trim();
+  const token = extractToken_(rawScan);
   if (!token) {
     return scanResult_('EMPTY_SCAN', '', '', '', '沒有掃描內容');
   }
@@ -267,10 +308,13 @@ function getGuestSheet_() {
 
 function getSpreadsheet_() {
   const active = SpreadsheetApp.getActiveSpreadsheet();
-  if (!active) {
-    throw new Error('請從綁定的 Google Sheet 開啟 Apps Script');
+  if (active) return active;
+
+  const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (!spreadsheetId) {
+    throw new Error('找不到綁定的 Google Sheet，請設定 SPREADSHEET_ID');
   }
-  return active;
+  return SpreadsheetApp.openById(spreadsheetId);
 }
 
 function ensureSheet_(ss, name, headers) {
@@ -304,6 +348,103 @@ function headerMap_(headerRow, expectedHeaders) {
     }
   });
   return map;
+}
+
+function parseApiPayload_(e) {
+  const raw = e && e.postData && e.postData.contents ? e.postData.contents : '{}';
+  const payload = JSON.parse(raw);
+  return {
+    action: String(payload.action || 'checkin').trim(),
+    token: String(payload.token || payload.scan || '').trim(),
+    pin: String(payload.pin || '').trim(),
+    operator: String(payload.operator || '').trim(),
+    station: String(payload.station || '').trim()
+  };
+}
+
+function safeApiCall_(payload, now) {
+  try {
+    return handleApiCheckin_(payload, now);
+  } catch (err) {
+    return {
+      ok: false,
+      status: 'ERROR',
+      message: err && err.message ? err.message : String(err),
+      processedAt: formatDate_(now)
+    };
+  }
+}
+
+function handleApiCheckin_(payload, now) {
+  verifyApiPin_(payload.pin);
+
+  if (payload.action !== 'checkin') {
+    throw new Error('不支援的 API action');
+  }
+
+  const ss = getSpreadsheet_();
+  const stationName = payload.station || API_STATION_NAME;
+  const operator = payload.operator || getScanOperator_();
+  const result = processScan_(ss, stationName, payload.token, now, operator);
+  appendScanLog_(ss, stationName, payload.token, result, operator, now);
+
+  return {
+    ok: result.status === 'CHECKED_IN' || result.status === 'ALREADY_CHECKED_IN',
+    status: result.status,
+    guestId: result.guestId,
+    displayName: result.displayName,
+    tableNo: result.tableNo,
+    message: result.message,
+    processedAt: formatDate_(now)
+  };
+}
+
+function verifyApiPin_(pin) {
+  const expected = PropertiesService.getScriptProperties().getProperty('API_PIN');
+  if (!expected) {
+    throw new Error('尚未設定 API_PIN');
+  }
+  if (String(pin || '') !== String(expected)) {
+    throw new Error('PIN 不正確');
+  }
+}
+
+function extractToken_(rawScan) {
+  const value = String(rawScan || '').trim();
+  if (!value) return '';
+
+  const queryMatch = value.match(/[?&]t=([^&#]+)/);
+  if (queryMatch) {
+    return decodeURIComponent(queryMatch[1]).trim();
+  }
+
+  const hashMatch = value.match(/[#&]t=([^&#]+)/);
+  if (hashMatch) {
+    return decodeURIComponent(hashMatch[1]).trim();
+  }
+
+  return value;
+}
+
+function jsonResponse_(payload) {
+  return ContentService
+    .createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function jsonpResponse_(callbackName, payload) {
+  const safeCallback = String(callbackName || '').replace(/[^\w.$]/g, '');
+  if (!safeCallback) {
+    return jsonResponse_({
+      ok: false,
+      status: 'ERROR',
+      message: 'callback 不正確'
+    });
+  }
+
+  return ContentService
+    .createTextOutput(`${safeCallback}(${JSON.stringify(payload)});`)
+    .setMimeType(ContentService.MimeType.JAVASCRIPT);
 }
 
 function getScanOperator_() {

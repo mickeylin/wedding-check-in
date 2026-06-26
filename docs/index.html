@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>婚禮 QR 報到</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>婚禮 QR 報到</h1>
+      <p>GitHub Pages 掃描頁 + Apps Script API</p>
+    </div>
+    <div id="connectionStatus" class="status-pill">未設定</div>
+  </header>
+
+  <main class="layout">
+    <section class="panel setup-panel" aria-labelledby="settingsTitle">
+      <h2 id="settingsTitle">設定</h2>
+
+      <label for="apiUrl">Apps Script API URL</label>
+      <input id="apiUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/.../exec">
+
+      <div class="field-row">
+        <div>
+          <label for="pin">工作人員 PIN</label>
+          <input id="pin" type="password" inputmode="numeric" autocomplete="off">
+        </div>
+        <div>
+          <label for="station">站台</label>
+          <input id="station" type="text" value="GitHubPages">
+        </div>
+      </div>
+
+      <label for="operator">操作人員</label>
+      <input id="operator" type="text" placeholder="例如：入口A 小美">
+
+      <button id="saveSettingsButton" class="secondary-button" type="button">儲存設定</button>
+    </section>
+
+    <section class="panel scanner-panel" aria-labelledby="scannerTitle">
+      <div class="section-header">
+        <h2 id="scannerTitle">掃描</h2>
+        <div class="button-row">
+          <button id="startButton" type="button">開始掃描</button>
+          <button id="stopButton" class="secondary-button" type="button" disabled>停止</button>
+        </div>
+      </div>
+
+      <div id="reader"></div>
+
+      <form id="manualForm" class="manual-form">
+        <label for="manualToken">手動輸入 Token</label>
+        <div class="manual-row">
+          <input id="manualToken" type="text" autocomplete="off">
+          <button type="submit">送出</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel result-panel" aria-labelledby="resultTitle">
+      <h2 id="resultTitle">結果</h2>
+      <div id="resultBox" class="result-box neutral">
+        <strong>等待掃描</strong>
+        <span>掃到 QR Code 後會顯示報到結果。</span>
+      </div>
+
+      <h3>最近紀錄</h3>
+      <ol id="recentList" class="recent-list"></ol>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
