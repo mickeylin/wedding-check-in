@@ -37,7 +37,7 @@ elements.manualForm.addEventListener('submit', event => {
   event.preventDefault();
   const token = extractToken(elements.manualToken.value);
   if (!token) {
-    showResult('沒有輸入 Token', '請輸入 QR_TOKEN 或含有 t 參數的網址。', 'warn');
+    showResult('沒有輸入 Token', '請輸入 QR_TOKEN。', 'warn');
     return;
   }
   submitCheckin(token);

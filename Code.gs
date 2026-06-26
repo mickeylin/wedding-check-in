@@ -95,7 +95,7 @@ function setupDashboard_(ss) {
 
 /**
  * 對已有姓名的資料列補上賓客 ID 與隨機 QR_TOKEN。
- * QR Code 可使用 GitHub Pages 穩定網址並以 t 參數帶入 QR_TOKEN。
+ * QR Code 建議只放 QR_TOKEN，讓圖面更簡單且方便條碼機掃描。
  */
 function generateGuestTokens() {
   const sheet = getGuestSheet_();

@@ -7,16 +7,16 @@
 - GitHub Pages：工作人員掃描頁，使用手機相機讀 QR Code。
 - Apps Script Web App：API 後端，驗證 PIN 後更新 Google Sheet。
 - Google Sheet：保存賓客主檔、報到狀態、掃描紀錄與 Dashboard。
-- QR Code：建議印 GitHub Pages 穩定網址，並用 `?t=QR_TOKEN` 帶 token。
+- QR Code：只印 `QR_TOKEN`，不要印完整 URL。
 
-同一組 QR Code 婚禮後仍可沿用：把 GitHub Pages 改成照片頁、感謝頁或彩蛋頁即可。
+純 token QR 比完整 URL 簡短、圖面更單純，也比較適合條碼機與手機掃描頁連續掃描。代價是賓客用一般手機相機掃這張 QR 時，不會自動開啟網頁，只會看到 token 文字。
 
 ## 工作流程
 
 ```text
 GitHub Pages 掃描頁
   -> 掃到 QR Code
-  -> 取出 t=QR_TOKEN
+  -> 讀取 QR_TOKEN
   -> JSONP 呼叫 Apps Script Web App API
   -> Apps Script 更新 Guests / ScanLog
   -> GitHub Pages 顯示報到結果
@@ -130,25 +130,17 @@ https://mickeylin.github.io/wedding-check-in/
 
 ## QR Code
 
-建議 QR Code 印 GitHub Pages 穩定網址：
+QR Code 只放 `QR_TOKEN`。
+
+若 `B2` 是 `QR_TOKEN`，可直接產生 QR 圖片：
 
 ```text
-https://mickeylin.github.io/wedding-check-in/?t=QR_TOKEN
+=IMAGE("https://quickchart.io/qr?text="&ENCODEURL(B2)&"&size=220")
 ```
 
-若 `B2` 是 `QR_TOKEN`，可在 Sheet 新增 `QR網址` 欄：
+注意：這個公式會使用第三方 QR 圖片服務。若不想把 token 傳給第三方，請改用離線 QR 工具批次產生。
 
-```text
-="https://mickeylin.github.io/wedding-check-in/?t="&ENCODEURL(B2)
-```
-
-再用 `QR網址` 產生 QR 圖片：
-
-```text
-=IMAGE("https://quickchart.io/qr?text="&ENCODEURL(你的QR網址儲存格)&"&size=220")
-```
-
-注意：這個公式會使用第三方 QR 圖片服務。若不想把網址傳給第三方，請改用離線 QR 工具批次產生。
+婚禮後如果要做照片頁、感謝頁或彩蛋頁，純 token QR 不會自動導頁。比較務實的做法是另外印或傳一組婚後 QR / 連結，或在婚禮現場另行公布短網址。
 
 ## 現場操作
 
@@ -222,7 +214,7 @@ Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 COR
 - `API_PIN` 是現場操作防線，不是高強度帳號系統。
 - 不要把 PIN 寫死在 `docs/app.js` 或公開文件。
 - 婚宴結束後建議更換或刪除 `API_PIN`。
-- 若 GitHub Pages 改成婚後彩蛋頁，請同步停用或改版 Apps Script API，避免舊 PIN 繼續可用。
+- 婚宴結束後建議停用 Apps Script Web App 部署，或刪除 / 更換 `API_PIN`。
 
 ## 條碼機備援
 
