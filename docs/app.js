@@ -41,7 +41,7 @@ elements.manualForm.addEventListener('submit', event => {
     showResult('沒有輸入賓客 ID', '請輸入賓客 ID。', 'warn');
     return;
   }
-  enqueueCheckin(guestId);
+  enqueueCheckin(guestId, { source: 'manual' });
   elements.manualGuestId.value = '';
 });
 
@@ -81,16 +81,22 @@ function onQrDecoded(decodedText) {
   const guestId = extractGuestId(decodedText);
 
   if (!guestId) return;
-  enqueueCheckin(guestId);
+  enqueueCheckin(guestId, { source: 'scanner' });
 }
 
-function enqueueCheckin(guestId) {
+function enqueueCheckin(guestId, options = {}) {
   if (!validateSettings()) return;
 
   const now = Date.now();
   const lastScanAt = recentGuestIdScanAt.get(guestId) || 0;
+  const isManual = options.source === 'manual';
 
-  if (pendingGuestIds.has(guestId) || now - lastScanAt < DUPLICATE_SCAN_COOLDOWN_MS) return;
+  if (pendingGuestIds.has(guestId)) {
+    if (isManual) showResult('報到處理中', `${guestId} 已送出，請等待回應。`, 'warn');
+    return;
+  }
+
+  if (!isManual && now - lastScanAt < DUPLICATE_SCAN_COOLDOWN_MS) return;
 
   if (inFlightCheckins >= MAX_IN_FLIGHT_CHECKINS) {
     showResult('處理佇列忙碌', '請稍等前一批報到完成。', 'warn');
