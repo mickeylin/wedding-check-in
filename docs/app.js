@@ -10,7 +10,7 @@ const elements = {
   startButton: document.querySelector('#startButton'),
   stopButton: document.querySelector('#stopButton'),
   manualForm: document.querySelector('#manualForm'),
-  manualToken: document.querySelector('#manualToken'),
+  manualGuestId: document.querySelector('#manualGuestId'),
   resultBox: document.querySelector('#resultBox'),
   recentList: document.querySelector('#recentList'),
   connectionStatus: document.querySelector('#connectionStatus')
@@ -19,7 +19,7 @@ const elements = {
 let scanner = null;
 let isScanning = false;
 let isSubmitting = false;
-let lastToken = '';
+let lastGuestId = '';
 let lastScanAt = 0;
 
 loadSettings();
@@ -35,13 +35,13 @@ elements.stopButton.addEventListener('click', stopScanner);
 
 elements.manualForm.addEventListener('submit', event => {
   event.preventDefault();
-  const token = extractToken(elements.manualToken.value);
-  if (!token) {
-    showResult('沒有輸入 Token', '請輸入 QR_TOKEN。', 'warn');
+  const guestId = extractGuestId(elements.manualGuestId.value);
+  if (!guestId) {
+    showResult('沒有輸入賓客 ID', '請輸入賓客 ID。', 'warn');
     return;
   }
-  submitCheckin(token);
-  elements.manualToken.value = '';
+  submitCheckin(guestId);
+  elements.manualGuestId.value = '';
 });
 
 async function startScanner() {
@@ -77,31 +77,31 @@ async function stopScanner() {
 }
 
 function onQrDecoded(decodedText) {
-  const token = extractToken(decodedText);
+  const guestId = extractGuestId(decodedText);
   const now = Date.now();
 
-  if (!token || isSubmitting) return;
-  if (token === lastToken && now - lastScanAt < SCAN_COOLDOWN_MS) return;
+  if (!guestId || isSubmitting) return;
+  if (guestId === lastGuestId && now - lastScanAt < SCAN_COOLDOWN_MS) return;
 
-  lastToken = token;
+  lastGuestId = guestId;
   lastScanAt = now;
-  submitCheckin(token);
+  submitCheckin(guestId);
 }
 
-async function submitCheckin(token) {
+async function submitCheckin(guestId) {
   if (!validateSettings()) return;
 
   const settings = getSettings();
   isSubmitting = true;
   pauseScanner();
-  showResult('處理中', token, 'neutral');
+  showResult('處理中', guestId, 'neutral');
 
   try {
-    const data = await jsonpCheckin(settings, token);
-    renderApiResult(data, token);
+    const data = await jsonpCheckin(settings, guestId);
+    renderApiResult(data, guestId);
   } catch (err) {
     showResult('API 呼叫失敗', `${messageOf(err)}。請確認 Apps Script Web App URL、PIN 與部署權限。`, 'error');
-    addRecent('ERROR', token, messageOf(err));
+    addRecent('ERROR', guestId, messageOf(err));
   } finally {
     window.setTimeout(() => {
       isSubmitting = false;
@@ -110,7 +110,7 @@ async function submitCheckin(token) {
   }
 }
 
-function jsonpCheckin(settings, token) {
+function jsonpCheckin(settings, guestId) {
   return new Promise((resolve, reject) => {
     const callbackName = `weddingCheckin_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
     const script = document.createElement('script');
@@ -131,7 +131,7 @@ function jsonpCheckin(settings, token) {
 
     const url = new URL(settings.apiUrl);
     url.searchParams.set('action', 'checkin');
-    url.searchParams.set('token', token);
+    url.searchParams.set('guestId', guestId);
     url.searchParams.set('pin', settings.pin);
     url.searchParams.set('station', settings.station);
     url.searchParams.set('operator', settings.operator);
@@ -148,7 +148,7 @@ function jsonpCheckin(settings, token) {
   });
 }
 
-function renderApiResult(data, token) {
+function renderApiResult(data, guestId) {
   const title = `${data.status || 'UNKNOWN'} ${data.displayName || ''}`.trim();
   const detail = [
     data.tableNo ? `桌號 ${data.tableNo}` : '',
@@ -162,8 +162,8 @@ function renderApiResult(data, token) {
       ? 'warn'
       : 'error';
 
-  showResult(title, detail || token, tone);
-  addRecent(data.status || 'UNKNOWN', token, detail || data.message || '');
+  showResult(title, detail || guestId, tone);
+  addRecent(data.status || 'UNKNOWN', guestId, detail || data.message || '');
 }
 
 function pauseScanner() {
@@ -182,17 +182,17 @@ function resumeScanner() {
   }
 }
 
-function extractToken(rawValue) {
+function extractGuestId(rawValue) {
   const value = String(rawValue || '').trim();
   if (!value) return '';
 
   try {
     const url = new URL(value);
-    const token = url.searchParams.get('t') || url.hash.match(/[?#&]t=([^&#]+)/)?.[1] || value;
-    return decodeURIComponent(token).trim();
+    const guestId = url.searchParams.get('t') || url.hash.match(/[?#&]t=([^&#]+)/)?.[1] || value;
+    return decodeURIComponent(guestId).trim();
   } catch (err) {
-    const token = value.match(/[?&]t=([^&#]+)/)?.[1] || value.match(/[#&]t=([^&#]+)/)?.[1] || value;
-    return decodeURIComponent(token).trim();
+    const guestId = value.match(/[?&]t=([^&#]+)/)?.[1] || value.match(/[#&]t=([^&#]+)/)?.[1] || value;
+    return decodeURIComponent(guestId).trim();
   }
 }
 
@@ -247,9 +247,9 @@ function showResult(title, message, tone) {
   elements.resultBox.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message || '')}</span>`;
 }
 
-function addRecent(status, token, message) {
+function addRecent(status, guestId, message) {
   const item = document.createElement('li');
-  item.textContent = `${new Date().toLocaleTimeString()} ${status} ${message || token}`;
+  item.textContent = `${new Date().toLocaleTimeString()} ${status} ${message || guestId}`;
   elements.recentList.prepend(item);
 
   while (elements.recentList.children.length > 8) {

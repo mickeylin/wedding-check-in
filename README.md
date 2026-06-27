@@ -7,16 +7,16 @@
 - GitHub Pages：工作人員掃描頁，使用手機相機讀 QR Code。
 - Apps Script Web App：API 後端，驗證 PIN 後更新 Google Sheet。
 - Google Sheet：保存賓客主檔、報到狀態、掃描紀錄與 Dashboard。
-- QR Code：只印 `QR_TOKEN`，不要印完整 URL。
+- QR Code：只印 `賓客ID`，不要印完整 URL。
 
-純 token QR 比完整 URL 簡短、圖面更單純，也比較適合手機掃描頁連續辨識。代價是賓客用一般手機相機掃這張 QR 時，不會自動開啟網頁，只會看到 token 文字。
+賓客 ID QR 比完整 URL 簡短、圖面更單純，也比較適合手機掃描頁連續辨識。代價是賓客用一般手機相機掃這張 QR 時，不會自動開啟網頁，只會看到賓客 ID 文字。
 
 ## 工作流程
 
 ```text
 GitHub Pages 掃描頁
   -> 掃到 QR Code
-  -> 讀取 QR_TOKEN
+  -> 讀取賓客 ID
   -> JSONP 呼叫 Apps Script Web App API
   -> Apps Script 更新 Guests / ScanLog
   -> GitHub Pages 顯示報到結果
@@ -44,7 +44,6 @@ GitHub Pages 掃描頁
 
 ```text
 賓客ID
-QR_TOKEN
 顯示姓名
 邀請單位
 新郎/新娘方
@@ -89,12 +88,12 @@ SPREADSHEET_ID = Google Sheet ID
 3. 第一次執行會要求授權，使用 Sheet 擁有者或管理者帳號授權。
 4. 回到 Sheet，確認 `Guests`、`ScanLog` 與 `Dashboard` 都已建立。
 
-### 4. 產生賓客 Token
+### 4. 產生賓客 ID
 
 1. 將正式賓客資料貼到 `Guests`。
 2. 至少填好 `顯示姓名`、`桌號`、`預計人數`。
-3. 在 Apps Script 執行 `generateGuestTokens`。
-4. 確認 `賓客ID` 與 `QR_TOKEN` 已產生。
+3. 在 Apps Script 執行 `generateGuestIds`。
+4. 確認 `賓客ID` 已產生。
 
 ### 5. 部署 Web App API
 
@@ -129,17 +128,17 @@ https://mickeylin.github.io/wedding-check-in/
 
 ## QR Code
 
-QR Code 只放 `QR_TOKEN`。
+QR Code 只放 `賓客ID`。
 
-若 `B2` 是 `QR_TOKEN`，可直接產生 QR 圖片：
+若 `A2` 是 `賓客ID`，可直接產生 QR 圖片：
 
 ```text
-=IMAGE("https://quickchart.io/qr?text="&ENCODEURL(B2)&"&size=220")
+=IMAGE("https://quickchart.io/qr?text="&ENCODEURL(A2)&"&size=220")
 ```
 
-注意：這個公式會使用第三方 QR 圖片服務。若不想把 token 傳給第三方，請改用離線 QR 工具批次產生。
+注意：這個公式會使用第三方 QR 圖片服務。若不想把賓客 ID 傳給第三方，請改用離線 QR 工具批次產生。
 
-婚禮後如果要做照片頁、感謝頁或彩蛋頁，純 token QR 不會自動導頁。比較務實的做法是另外印或傳一組婚後 QR / 連結，或在婚禮現場另行公布短網址。
+婚禮後如果要做照片頁、感謝頁或彩蛋頁，純賓客 ID QR 不會自動導頁。比較務實的做法是另外印或傳一組婚後 QR / 連結，或在婚禮現場另行公布短網址。
 
 ## 現場操作
 
@@ -149,7 +148,7 @@ QR Code 只放 `QR_TOKEN`。
 4. 輸入站台與操作人員名稱。
 5. 按「儲存設定」。
 6. 按「開始掃描」並允許相機權限。
-7. 掃到 QR 後，頁面會顯示報到成功、重複報到或找不到 token。
+7. 掃到 QR 後，頁面會顯示報到成功、重複報到或找不到賓客 ID。
 
 掃描成功時，Apps Script 會更新 `Guests`：
 
@@ -166,7 +165,7 @@ QR Code 只放 `QR_TOKEN`。
 GitHub Pages 預設使用 JSONP：
 
 ```text
-GET WEB_APP_URL?action=checkin&token=...&pin=...&station=...&operator=...&callback=...
+GET WEB_APP_URL?action=checkin&guestId=賓客ID&pin=...&station=...&operator=...&callback=...
 ```
 
 Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 CORS 的後端：
@@ -174,7 +173,7 @@ Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 COR
 ```json
 {
   "action": "checkin",
-  "token": "QR_TOKEN",
+  "guestId": "G023",
   "pin": "工作人員PIN",
   "station": "入口A",
   "operator": "小美"
@@ -201,9 +200,9 @@ Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 COR
 
 1. GitHub Pages 能開啟並啟動相機。
 2. API URL 與 PIN 設定後可成功掃有效 QR。
-3. 掃有效 token，`Guests` 更新為 `已報到`。
-4. 重複掃同一 token，頁面顯示 `ALREADY_CHECKED_IN`，且不覆蓋原報到時間。
-5. 掃不存在 token，頁面顯示 `NOT_FOUND`。
+3. 掃有效賓客 ID，`Guests` 更新為 `已報到`。
+4. 重複掃同一賓客 ID，頁面顯示 `ALREADY_CHECKED_IN`，且不覆蓋原報到時間。
+5. 掃不存在賓客 ID，頁面顯示 `NOT_FOUND`。
 6. `ScanLog` 每次掃描都有新增紀錄。
 7. 兩台手機同時掃不同賓客，都能成功寫回 `Guests`。
 8. PIN 錯誤時不會更新 Sheet。
