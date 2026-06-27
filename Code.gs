@@ -316,7 +316,9 @@ function handleApiCheckin_(payload, now) {
   const stationName = payload.station || API_STATION_NAME;
   const operator = payload.operator || getScanOperator_();
   const result = processScan_(ss, stationName, payload.guestId, now, operator);
-  appendScanLog_(ss, stationName, payload.guestId, result, operator, now);
+  if (shouldAppendScanLog_(result.status)) {
+    appendScanLog_(ss, stationName, payload.guestId, result, operator, now);
+  }
 
   return {
     ok: result.status === 'CHECKED_IN' || result.status === 'ALREADY_CHECKED_IN',
@@ -337,6 +339,12 @@ function verifyApiPin_(pin) {
   if (String(pin || '') !== String(expected)) {
     throw new Error('PIN 不正確');
   }
+}
+
+function shouldAppendScanLog_(status) {
+  if (status !== 'CHECKED_IN') return true;
+  const value = PropertiesService.getScriptProperties().getProperty('LOG_SUCCESS_CHECKINS');
+  return ['true', 'yes', '1', 'y'].includes(String(value || '').trim().toLowerCase());
 }
 
 function extractGuestId_(rawScan) {

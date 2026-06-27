@@ -75,11 +75,14 @@ GitHub Pages 掃描頁
 ```text
 API_PIN = 現場工作人員使用的 PIN
 SPREADSHEET_ID = Google Sheet ID
+LOG_SUCCESS_CHECKINS = false
 ```
 
 `API_PIN` 不要寫進 GitHub Pages 程式碼。工作人員在掃描頁第一次使用時輸入，瀏覽器會存在該裝置的 localStorage。
 
 `SPREADSHEET_ID` 是 Google Sheet 網址中 `/d/` 後面、`/edit` 前面的那段。若 Apps Script 是綁定在該 Sheet 上，通常也能直接取得 active spreadsheet；設定此值是為了 Web App 執行環境更穩。
+
+`LOG_SUCCESS_CHECKINS` 預設可不填或填 `false`。這樣成功報到不寫入 `ScanLog`，只記錄重複報到、找不到賓客 ID、錯誤等狀態，可減少一次 Sheet 寫入並改善現場速度。若想完整保留每一次成功報到紀錄，填 `true`。
 
 ### 3. 初始化 Sheet
 
@@ -158,7 +161,7 @@ QR Code 只放 `賓客ID`。
 - `報到時間` 填當下時間
 - `報到站台` 填掃描頁輸入的站台
 
-每次 API 掃描都會追加一筆到 `ScanLog`。
+預設只有重複報到、找不到賓客 ID、錯誤等狀態會追加到 `ScanLog`。若 `LOG_SUCCESS_CHECKINS=true`，成功報到也會寫入 `ScanLog`。
 
 ## API
 
@@ -203,7 +206,7 @@ Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 COR
 3. 掃有效賓客 ID，`Guests` 更新為 `已報到`。
 4. 重複掃同一賓客 ID，頁面顯示 `ALREADY_CHECKED_IN`，且不覆蓋原報到時間。
 5. 掃不存在賓客 ID，頁面顯示 `NOT_FOUND`。
-6. `ScanLog` 每次掃描都有新增紀錄。
+6. `ScanLog` 會記錄重複報到、找不到賓客 ID 與錯誤；若 `LOG_SUCCESS_CHECKINS=true`，成功報到也會新增紀錄。
 7. 兩台手機同時掃不同賓客，都能成功寫回 `Guests`。
 8. PIN 錯誤時不會更新 Sheet。
 
