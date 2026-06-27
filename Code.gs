@@ -28,6 +28,7 @@ const SCAN_LOG_HEADERS = [
 ];
 
 const API_STATION_NAME = 'GitHubPages';
+const GUEST_COL = columnMap_(GUEST_HEADERS);
 
 /**
  * 第一次使用時執行，建立 GitHub Pages 掃描 API 需要的工作表。
@@ -151,28 +152,30 @@ function processScan_(ss, stationName, rawScan, now, operator) {
     return scanResult_('NOT_FOUND', '', '', '', `找不到 QR Token：${token}`);
   }
 
-  const { sheet, rowNumber, row, map } = result;
-  const guestId = String(row[map['賓客ID']] || '');
-  const displayName = String(row[map['顯示姓名']] || '');
-  const tableNo = String(row[map['桌號']] || '');
-  const wasCheckedIn = String(row[map['報到狀態']] || '').trim() === '已報到';
+  const { sheet, rowNumber, row } = result;
+  const guestId = String(row[GUEST_COL['賓客ID']] || '');
+  const displayName = String(row[GUEST_COL['顯示姓名']] || '');
+  const tableNo = String(row[GUEST_COL['桌號']] || '');
+  const wasCheckedIn = String(row[GUEST_COL['報到狀態']] || '').trim() === '已報到';
 
   if (wasCheckedIn) {
-    const checkinTime = formatDate_(row[map['報到時間']]);
+    const checkinTime = formatDate_(row[GUEST_COL['報到時間']]);
     const message = checkinTime ? `已報到，原報到時間：${checkinTime}` : '已報到';
     return scanResult_('ALREADY_CHECKED_IN', guestId, displayName, tableNo, message);
   }
 
-  const existingActualCount = Number(row[map['實到人數']] || 0);
-  const expectedCount = Number(row[map['預計人數']] || 0);
-  row[map['實到人數']] = existingActualCount || expectedCount || 1;
-  row[map['報到狀態']] = '已報到';
-  row[map['操作人員']] = operator;
-  row[map['報到時間']] = now;
-  row[map['報到站台']] = stationName;
+  const existingActualCount = Number(row[GUEST_COL['實到人數']] || 0);
+  const expectedCount = Number(row[GUEST_COL['預計人數']] || 0);
+  const actualCount = existingActualCount || expectedCount || 1;
 
-  sheet.getRange(rowNumber, 1, 1, GUEST_HEADERS.length)
-    .setValues([row.slice(0, GUEST_HEADERS.length)]);
+  sheet.getRange(rowNumber, GUEST_COL['實到人數'] + 1, 1, 5)
+    .setValues([[
+      actualCount,
+      '已報到',
+      operator,
+      now,
+      stationName
+    ]]);
 
   return scanResult_('CHECKED_IN', guestId, displayName, tableNo, '報到成功');
 }
@@ -182,7 +185,7 @@ function scanResult_(status, guestId, displayName, tableNo, message) {
 }
 
 function appendScanLog_(ss, stationName, rawScan, result, operator, now) {
-  const sheet = ensureSheet_(ss, 'ScanLog', SCAN_LOG_HEADERS);
+  const sheet = getRequiredSheet_(ss, 'ScanLog');
   sheet.appendRow([
     now,
     stationName,
@@ -197,22 +200,32 @@ function appendScanLog_(ss, stationName, rawScan, result, operator, now) {
 }
 
 function findGuestByToken_(ss, token) {
-  const sheet = ensureSheet_(ss, 'Guests', GUEST_HEADERS);
-  const values = sheet.getDataRange().getValues();
-  if (values.length < 2) return null;
+  const sheet = getRequiredSheet_(ss, 'Guests');
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
 
-  const map = headerMap_(values[0], GUEST_HEADERS);
-  for (let i = 1; i < values.length; i++) {
-    if (String(values[i][map['QR_TOKEN']] || '').trim() === token) {
-      return {
-        sheet,
-        rowNumber: i + 1,
-        row: values[i],
-        map
-      };
-    }
-  }
-  return null;
+  const tokenRange = sheet.getRange(2, GUEST_COL['QR_TOKEN'] + 1, lastRow - 1, 1);
+  const found = tokenRange
+    .createTextFinder(token)
+    .matchEntireCell(true)
+    .findNext();
+
+  if (!found) return null;
+
+  const rowNumber = found.getRow();
+  return {
+    sheet,
+    rowNumber,
+    row: sheet.getRange(rowNumber, 1, 1, GUEST_HEADERS.length).getValues()[0]
+  };
+}
+
+function columnMap_(headers) {
+  const map = {};
+  headers.forEach((header, index) => {
+    map[header] = index;
+  });
+  return map;
 }
 
 function getGuestSheet_() {
@@ -245,6 +258,14 @@ function ensureSheet_(ss, name, headers) {
         sheet.getRange(1, index + 1).setValue(header);
       }
     });
+  }
+  return sheet;
+}
+
+function getRequiredSheet_(ss, name) {
+  const sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    throw new Error(`找不到工作表：${name}，請先執行 setupSheet`);
   }
   return sheet;
 }
