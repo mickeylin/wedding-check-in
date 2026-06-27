@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'wedding-check-in-settings';
-const SCAN_COOLDOWN_MS = 1800;
+const DUPLICATE_SCAN_COOLDOWN_MS = 2500;
+const MAX_IN_FLIGHT_CHECKINS = 3;
 
 const elements = {
   apiUrl: document.querySelector('#apiUrl'),
@@ -18,9 +19,9 @@ const elements = {
 
 let scanner = null;
 let isScanning = false;
-let isSubmitting = false;
-let lastGuestId = '';
-let lastScanAt = 0;
+let inFlightCheckins = 0;
+const pendingGuestIds = new Set();
+const recentGuestIdScanAt = new Map();
 
 loadSettings();
 updateConnectionStatus();
@@ -40,7 +41,7 @@ elements.manualForm.addEventListener('submit', event => {
     showResult('沒有輸入賓客 ID', '請輸入賓客 ID。', 'warn');
     return;
   }
-  submitCheckin(guestId);
+  enqueueCheckin(guestId);
   elements.manualGuestId.value = '';
 });
 
@@ -78,23 +79,34 @@ async function stopScanner() {
 
 function onQrDecoded(decodedText) {
   const guestId = extractGuestId(decodedText);
+
+  if (!guestId) return;
+  enqueueCheckin(guestId);
+}
+
+function enqueueCheckin(guestId) {
+  if (!validateSettings()) return;
+
   const now = Date.now();
+  const lastScanAt = recentGuestIdScanAt.get(guestId) || 0;
 
-  if (!guestId || isSubmitting) return;
-  if (guestId === lastGuestId && now - lastScanAt < SCAN_COOLDOWN_MS) return;
+  if (pendingGuestIds.has(guestId) || now - lastScanAt < DUPLICATE_SCAN_COOLDOWN_MS) return;
 
-  lastGuestId = guestId;
-  lastScanAt = now;
+  if (inFlightCheckins >= MAX_IN_FLIGHT_CHECKINS) {
+    showResult('處理佇列忙碌', '請稍等前一批報到完成。', 'warn');
+    return;
+  }
+
+  recentGuestIdScanAt.set(guestId, now);
+  pruneRecentGuestIds(now);
   submitCheckin(guestId);
 }
 
 async function submitCheckin(guestId) {
-  if (!validateSettings()) return;
-
   const settings = getSettings();
-  isSubmitting = true;
-  pauseScanner();
-  showResult('處理中', guestId, 'neutral');
+  pendingGuestIds.add(guestId);
+  inFlightCheckins += 1;
+  showResult('已送出報到', `${guestId} 已送出，鏡頭可繼續掃描。`, 'neutral');
 
   try {
     const data = await jsonpCheckin(settings, guestId);
@@ -103,11 +115,20 @@ async function submitCheckin(guestId) {
     showResult('API 呼叫失敗', `${messageOf(err)}。請確認 Apps Script Web App URL、PIN 與部署權限。`, 'error');
     addRecent('ERROR', guestId, messageOf(err));
   } finally {
-    window.setTimeout(() => {
-      isSubmitting = false;
-      resumeScanner();
-    }, SCAN_COOLDOWN_MS);
+    pendingGuestIds.delete(guestId);
+    recentGuestIdScanAt.set(guestId, Date.now());
+    inFlightCheckins = Math.max(0, inFlightCheckins - 1);
+    pruneRecentGuestIds(Date.now());
   }
+}
+
+function pruneRecentGuestIds(now) {
+  const maxAgeMs = DUPLICATE_SCAN_COOLDOWN_MS * 4;
+  recentGuestIdScanAt.forEach((lastScanAt, guestId) => {
+    if (now - lastScanAt > maxAgeMs) {
+      recentGuestIdScanAt.delete(guestId);
+    }
+  });
 }
 
 function jsonpCheckin(settings, guestId) {
@@ -164,22 +185,6 @@ function renderApiResult(data, guestId) {
 
   showResult(title, detail || guestId, tone);
   addRecent(data.status || 'UNKNOWN', guestId, detail || data.message || '');
-}
-
-function pauseScanner() {
-  try {
-    if (scanner && isScanning) scanner.pause(true);
-  } catch (err) {
-    // Some browser/library combinations do not support pause during decode.
-  }
-}
-
-function resumeScanner() {
-  try {
-    if (scanner && isScanning) scanner.resume();
-  } catch (err) {
-    // Scanner is still usable through the next decode callback.
-  }
 }
 
 function extractGuestId(rawValue) {
