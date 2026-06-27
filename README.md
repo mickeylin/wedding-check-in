@@ -9,7 +9,7 @@
 - Google Sheet：保存賓客主檔、報到狀態、掃描紀錄與 Dashboard。
 - QR Code：只印 `QR_TOKEN`，不要印完整 URL。
 
-純 token QR 比完整 URL 簡短、圖面更單純，也比較適合條碼機與手機掃描頁連續掃描。代價是賓客用一般手機相機掃這張 QR 時，不會自動開啟網頁，只會看到 token 文字。
+純 token QR 比完整 URL 簡短、圖面更單純，也比較適合手機掃描頁連續辨識。代價是賓客用一般手機相機掃這張 QR 時，不會自動開啟網頁，只會看到 token 文字。
 
 ## 工作流程
 
@@ -26,7 +26,7 @@ GitHub Pages 掃描頁
 
 ## 檔案
 
-- `Code.gs`：Apps Script 後端，包含 Sheet 初始化、`onEdit` 條碼機流程、`doGet`/`doPost` API。
+- `Code.gs`：Apps Script 後端，包含 Sheet 初始化與 `doGet`/`doPost` API。
 - `docs/index.html`：GitHub Pages 掃描頁。
 - `docs/app.js`：相機掃描、PIN 設定、API 呼叫與結果顯示。
 - `docs/styles.css`：掃描頁樣式。
@@ -38,7 +38,6 @@ GitHub Pages 掃描頁
 
 - `Guests`：賓客主檔與最後報到狀態。
 - `ScanLog`：每一次掃描紀錄。
-- `Scan_入口A`、`Scan_入口B`、`Scan_備用`：保留給條碼機掃描備援。
 - `Dashboard`：現場統計。
 
 `Guests` 欄位：
@@ -88,7 +87,7 @@ SPREADSHEET_ID = Google Sheet ID
 1. 在 Apps Script 上方函式選單選 `setupSheet`。
 2. 按「執行」。
 3. 第一次執行會要求授權，使用 Sheet 擁有者或管理者帳號授權。
-4. 回到 Sheet，確認 `Guests`、`ScanLog`、站台頁與 `Dashboard` 都已建立。
+4. 回到 Sheet，確認 `Guests`、`ScanLog` 與 `Dashboard` 都已建立。
 
 ### 4. 產生賓客 Token
 
@@ -213,9 +212,4 @@ Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 COR
 
 - `API_PIN` 是現場操作防線，不是高強度帳號系統。
 - 不要把 PIN 寫死在 `docs/app.js` 或公開文件。
-- 婚宴結束後建議更換或刪除 `API_PIN`。
 - 婚宴結束後建議停用 Apps Script Web App 部署，或刪除 / 更換 `API_PIN`。
-
-## 條碼機備援
-
-這個分支仍保留 Google Sheet 站台頁 `onEdit` 流程。若手機掃描頁臨時出問題，可以改用條碼機掃到 `Scan_入口A` 的 `掃描內容` 欄。
