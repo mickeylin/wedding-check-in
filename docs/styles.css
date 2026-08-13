@@ -253,10 +253,6 @@ button:disabled {
   border-color: #b5d8bf;
 }
 
-.lookup-card.is-warning {
-  background: var(--warn);
-  border-color: #e4ca76;
-}
 
 .lookup-card-title {
   font-size: 18px;

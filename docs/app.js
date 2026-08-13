@@ -15,7 +15,7 @@ const elements = {
   manualGuestId: document.querySelector('#manualGuestId'),
   lookupForm: document.querySelector('#lookupForm'),
   lookupQuery: document.querySelector('#lookupQuery'),
-  lookupGroup: document.querySelector('#lookupGroup'),
+  lookupSide: document.querySelector('#lookupSide'),
   lookupStatus: document.querySelector('#lookupStatus'),
   lookupResults: document.querySelector('#lookupResults'),
   resultBox: document.querySelector('#resultBox'),
@@ -158,7 +158,7 @@ function pruneRecentGuestIds(now) {
 async function searchGuests() {
   if (!validateSettings()) return;
   const query = elements.lookupQuery.value.trim();
-  const group = elements.lookupGroup.value.trim();
+  const side = elements.lookupSide.value.trim();
   if (!query) {
     elements.lookupStatus.textContent = '請輸入姓名或稱呼。';
     elements.lookupResults.replaceChildren();
@@ -168,18 +168,18 @@ async function searchGuests() {
   elements.lookupStatus.textContent = '查找中⋯';
   elements.lookupResults.replaceChildren();
   try {
-    const data = await jsonpLookup(getSettings(), query, group);
+    const data = await jsonpLookup(getSettings(), query, side);
     renderLookupResults(data);
   } catch (err) {
     elements.lookupStatus.textContent = '查找失敗：' + messageOf(err);
   }
 }
 
-function jsonpLookup(settings, query, group) {
+function jsonpLookup(settings, query, side) {
   return jsonpRequest(settings, {
     action: 'lookup',
     query,
-    group,
+    side,
     sessionToken: settings.sessionToken || readSessionToken(),
     requestId: createRequestId()
   });
@@ -332,23 +332,20 @@ function renderLookupResults(data) {
   }
   elements.lookupStatus.textContent = result.hasMore
     ? '找到前 ' + results.length + ' 筆，請輸入更完整的姓名。'
-    : '找到 ' + results.length + ' 筆，請確認姓名與關係。';
+    : '找到 ' + results.length + ' 筆，請確認姓名與新郎／新娘方。';
   results.forEach(guest => {
     const isCheckedIn = guest.checkInStatus === '已報到';
-    const attendanceStatus = guest.attendanceStatus || '出席狀態未填寫';
-    const isWarning = !isCheckedIn && attendanceStatus !== '會參加';
     const card = document.createElement('article');
-    card.className = 'lookup-card'
-      + (isCheckedIn ? ' is-checked-in' : '')
-      + (isWarning ? ' is-warning' : '');
+    card.className = 'lookup-card' + (isCheckedIn ? ' is-checked-in' : '');
+    const sideText = guest.side ? '新郎／新娘方 ' + guest.side : '新郎／新娘方未填寫';
     const tableText = guest.tableNo ? '桌號 ' + guest.tableNo : '桌號尚未分配';
     const checkInText = isCheckedIn ? '已報到' : '尚未報到';
     card.innerHTML = [
       '<div class="lookup-card-title">' + escapeHtml(guest.displayName || '未命名賓客') + '</div>',
       '<div class="lookup-card-meta">',
-      '<span>' + escapeHtml(guest.group || '關係未填寫') + '</span>',
+      '<span>' + escapeHtml(sideText) + '</span>',
       '<span>' + escapeHtml(tableText) + ' / 預計 ' + escapeHtml(guest.expectedCount || 0) + ' 人</span>',
-      '<span>' + escapeHtml(attendanceStatus) + ' / ' + escapeHtml(checkInText) + '</span>',
+      '<span>' + escapeHtml(checkInText) + '</span>',
       '</div>'
     ].join('');
     const actions = document.createElement('div');
@@ -359,15 +356,14 @@ function renderLookupResults(data) {
     button.textContent = isCheckedIn
       ? '已報到'
       : guest.guestId
-        ? (isWarning ? '確認報到' : '報到')
+        ? '報到'
         : '缺少賓客 ID';
     button.addEventListener('click', () => {
       const confirmation = [
         '確認是這位賓客嗎？',
         '姓名：' + (guest.displayName || '未命名賓客'),
-        '關係：' + (guest.group || '未填寫'),
-        tableText,
-        '出席狀態：' + attendanceStatus
+        '新郎／新娘方：' + (guest.side || '未填寫'),
+        tableText
       ].join('\\n');
       if (window.confirm(confirmation)) {
         enqueueCheckin(guest.guestId, { source: 'lookup' });

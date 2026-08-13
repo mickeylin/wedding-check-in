@@ -21,12 +21,9 @@ function createInMemoryDependencies() {
       expectedCount: 2,
       actualCount: 0,
       status: '',
-      group: '男方朋友',
       side: '男方',
-      attendanceStatus: '會參加',
       checkedInAt: null,
-      operator: '',
-      station: ''
+      operator: ''
     }]
   ]);
   const scanLogs = [];
@@ -43,14 +40,14 @@ function createInMemoryDependencies() {
       findById(guestId) {
         return guests.get(guestId) || null;
       },
-      search(query, group) {
+      search(query, side) {
         const normalizedQuery = String(query || '').trim().toLowerCase();
-        const normalizedGroup = String(group || '').trim().toLowerCase();
+        const normalizedSide = String(side || '').trim().toLowerCase();
         return [...guests.values()].filter(guest => {
           const matchesQuery = guest.displayName.toLowerCase().includes(normalizedQuery)
             || guest.guestId.toLowerCase().includes(normalizedQuery);
-          const matchesGroup = !normalizedGroup || guest.group.toLowerCase().includes(normalizedGroup);
-          return matchesQuery && matchesGroup;
+          const matchesSide = !normalizedSide || guest.side.toLowerCase().includes(normalizedSide);
+          return matchesQuery && matchesSide;
         });
       },
       markCheckedIn(guestId, update) {
@@ -88,9 +85,26 @@ test('有效賓客第一次報到會更新 Guests 並回傳 CHECKED_IN', () => {
   assert.equal(dependencies.guests.get('G001').status, '已報到');
   assert.equal(dependencies.guests.get('G001').actualCount, 2);
   assert.equal(dependencies.guests.get('G001').operator, 'staff-a');
-  assert.equal(dependencies.guests.get('G001').station, '入口A');
 });
 
+test('報到站台只記錄在 ScanLog，不寫入 Guests', () => {
+  const { createCheckInModule_ } = loadCodeGs();
+  const dependencies = createInMemoryDependencies();
+  dependencies.shouldLogSuccessCheckIns = () => true;
+  const checkIn = createCheckInModule_(dependencies);
+
+  const result = checkIn.attempt({
+    guestId: 'G001',
+    operator: 'staff-a',
+    station: '入口A',
+    requestId: 'req-station'
+  });
+
+  assert.equal(result.status, 'CHECKED_IN');
+  assert.equal(dependencies.guests.get('G001').station, undefined);
+  assert.equal(dependencies.scanLogs.length, 1);
+  assert.equal(dependencies.scanLogs[0].station, '入口A');
+});
 test('已報到賓客再次報到會回傳 ALREADY_CHECKED_IN 且保留原時間', () => {
   const { createCheckInModule_ } = loadCodeGs();
   const dependencies = createInMemoryDependencies();
@@ -116,7 +130,6 @@ test('已報到賓客再次報到會回傳 ALREADY_CHECKED_IN 且保留原時間
   assert.match(second.message, /原報到時間/);
   assert.equal(dependencies.guests.get('G001').checkedInAt, originalCheckedInAt);
   assert.equal(dependencies.guests.get('G001').operator, 'staff-a');
-  assert.equal(dependencies.guests.get('G001').station, '入口A');
 });
 
 test('找不到賓客時回傳 NOT_FOUND 且不寫入 Guests', () => {
@@ -215,7 +228,7 @@ test('Guests 寫入成功但 ScanLog 失敗時仍回傳 CHECKED_IN', () => {
   assert.equal(result.warnings[0], 'SCAN_LOG_FAILED');
   assert.equal(dependencies.guests.get('G001').status, '已報到');
 });
-test('姓名查找會回傳桌號、關係與出席狀態', () => {
+test('姓名查找會回傳桌號與新郎／新娘方', () => {
   const { createGuestLookupModule_ } = loadCodeGs();
   const dependencies = createInMemoryDependencies();
   const lookup = createGuestLookupModule_({
@@ -223,15 +236,14 @@ test('姓名查找會回傳桌號、關係與出席狀態', () => {
     maxResults: 20
   });
 
-  const result = lookup.search({ query: '王', group: '男方' });
+  const result = lookup.search({ query: '王', side: '男方' });
 
   assert.equal(result.status, 'LOOKUP_RESULTS');
   assert.equal(result.ok, true);
   assert.equal(result.results.length, 1);
   assert.equal(result.results[0].guestId, 'G001');
   assert.equal(result.results[0].tableNo, '8');
-  assert.equal(result.results[0].group, '男方朋友');
-  assert.equal(result.results[0].attendanceStatus, '會參加');
+  assert.equal(result.results[0].side, '男方');
 });
 
 test('姓名查找要求查詢字串且找不到時不回傳資料', () => {

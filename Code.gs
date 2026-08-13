@@ -1,18 +1,14 @@
 const GUEST_HEADERS = [
   '賓客ID',
   '顯示姓名',
-  '邀請單位',
   '新郎/新娘方',
-  '分組',
   '桌號',
   '預計人數',
   '實到人數',
   '報到狀態',
   '操作人員',
   '報到時間',
-  '報到站台',
-  '備註',
-  '出席確認'
+  '備註'
 ];
 
 const SCAN_LOG_HEADERS = [
@@ -37,12 +33,12 @@ const GUEST_COL = columnMap_(GUEST_HEADERS);
  */
 function setupSheet() {
   const ss = getSpreadsheet_();
-  const guestSheet = ensureSheet_(ss, 'Guests', GUEST_HEADERS);
+  const guestSheet = ensureGuestSheet_(ss);
   const scanLogSheet = ensureSheet_(ss, 'ScanLog', SCAN_LOG_HEADERS);
 
   guestSheet.setFrozenRows(1);
-  guestSheet.getRange('G:H').setNumberFormat('0');
-  guestSheet.getRange('K:K').setNumberFormat('yyyy/mm/dd hh:mm:ss');
+  guestSheet.getRange('E:F').setNumberFormat('0');
+  guestSheet.getRange('I:I').setNumberFormat('yyyy/mm/dd hh:mm:ss');
   guestSheet.autoResizeColumns(1, GUEST_HEADERS.length);
 
   scanLogSheet.setFrozenRows(1);
@@ -60,10 +56,10 @@ function setupDashboard_(ss) {
   sheet.getRange(1, 1, 8, 2).setValues([
     ['項目', '數值'],
     ['總組數', '=COUNTA(Guests!B2:B)'],
-    ['已報到組數', '=COUNTIF(Guests!I2:I,"已報到")'],
-    ['未報到組數', '=COUNTIFS(Guests!B2:B,"<>",Guests!I2:I,"<>已報到")'],
-    ['總預計人數', '=SUM(Guests!G2:G)'],
-    ['實到人數', '=SUM(Guests!H2:H)'],
+    ['已報到組數', '=COUNTIF(Guests!G2:G,"已報到")'],
+    ['未報到組數', '=COUNTIFS(Guests!B2:B,"<>",Guests!G2:G,"<>已報到")'],
+    ['總預計人數', '=SUM(Guests!E2:E)'],
+    ['實到人數', '=SUM(Guests!F2:F)'],
     ['重複掃描次數', '=COUNTIF(ScanLog!D2:D,"ALREADY_CHECKED_IN")'],
     ['找不到 QR 次數', '=COUNTIF(ScanLog!D2:D,"NOT_FOUND")']
   ]);
@@ -133,7 +129,7 @@ function doGet(e) {
     payload = {
       action: 'lookup',
       query: String(params.query || '').trim(),
-      group: String(params.group || '').trim(),
+      side: String(params.side || '').trim(),
       sessionToken: String(params.sessionToken || '').trim(),
       requestId: String(params.requestId || '').trim()
     };
@@ -180,8 +176,50 @@ function columnMap_(headers) {
   return map;
 }
 
+function ensureGuestSheet_(ss) {
+  let sheet = ss.getSheetByName('Guests');
+  if (!sheet) sheet = ss.insertSheet('Guests');
+
+  const lastRow = Math.max(sheet.getLastRow(), 1);
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const existingHeaders = sheet.getRange(1, 1, 1, lastColumn).getValues()[0]
+    .map(value => String(value || '').trim());
+  const hasHeader = existingHeaders.some(Boolean);
+
+  if (!hasHeader) {
+    if (lastRow > 1) {
+      throw new Error('Guests 第一列缺少標題，請先整理或備份資料');
+    }
+    sheet.getRange(1, 1, 1, GUEST_HEADERS.length).setValues([GUEST_HEADERS]);
+    return sheet;
+  }
+
+  const existingMap = columnMap_(existingHeaders);
+  const missingHeaders = GUEST_HEADERS.filter(header => existingMap[header] === undefined);
+  if (missingHeaders.length) {
+    throw new Error('Guests 缺少必要欄位：' + missingHeaders.join('、'));
+  }
+
+  const isCanonical = GUEST_HEADERS.every((header, index) => existingHeaders[index] === header)
+    && existingHeaders.slice(GUEST_HEADERS.length).every(value => !value);
+  if (isCanonical) return sheet;
+
+  const rows = lastRow > 1
+    ? sheet.getRange(2, 1, lastRow - 1, lastColumn).getValues()
+    : [];
+  const migratedRows = rows.map(row => GUEST_HEADERS.map(header => row[existingMap[header]]));
+
+  sheet.getRange(1, 1, 1, GUEST_HEADERS.length).setValues([GUEST_HEADERS]);
+  if (migratedRows.length) {
+    sheet.getRange(2, 1, migratedRows.length, GUEST_HEADERS.length).setValues(migratedRows);
+  }
+  if (lastColumn > GUEST_HEADERS.length) {
+    sheet.getRange(1, GUEST_HEADERS.length + 1, lastRow, lastColumn - GUEST_HEADERS.length).clearContent();
+  }
+  return sheet;
+}
 function getGuestSheet_() {
-  return ensureSheet_(getSpreadsheet_(), 'Guests', GUEST_HEADERS);
+  return ensureGuestSheet_(getSpreadsheet_());
 }
 
 function getSpreadsheet_() {
@@ -242,12 +280,12 @@ function createGoogleSheetsGuestStore_(ss) {
       const found = findGuestById_(ss, guestId);
       return found ? guestRecordFromRow_(found.row) : null;
     },
-    search(query, group) {
+    search(query, side) {
       const sheet = getRequiredSheet_(ss, 'Guests');
       const lastRow = sheet.getLastRow();
       if (lastRow < 2) return [];
       const normalizedQuery = normalizeLookupText_(query);
-      const normalizedGroup = normalizeLookupText_(group);
+      const normalizedSide = normalizeLookupText_(side);
       const rows = sheet
         .getRange(2, 1, lastRow - 1, GUEST_HEADERS.length)
         .getValues();
@@ -255,7 +293,7 @@ function createGoogleSheetsGuestStore_(ss) {
         .map(guestRecordFromRow_)
         .filter(guest => {
           if (!guest.displayName) return false;
-          if (normalizedGroup && !normalizeLookupText_(guest.group).includes(normalizedGroup)) {
+          if (normalizedSide && !normalizeLookupText_(guest.side).includes(normalizedSide)) {
             return false;
           }
           const name = normalizeLookupText_(guest.displayName);
@@ -274,13 +312,12 @@ function createGoogleSheetsGuestStore_(ss) {
         throw apiError_('NOT_FOUND', '找不到要更新的賓客');
       }
       found.sheet
-        .getRange(found.rowNumber, GUEST_COL['實到人數'] + 1, 1, 5)
+        .getRange(found.rowNumber, GUEST_COL['實到人數'] + 1, 1, 4)
         .setValues([[
           Number(update.actualCount) || 1,
           update.status,
           update.operator || '',
-          update.checkedInAt,
-          update.station || ''
+          update.checkedInAt
         ]]);
     }
   };
@@ -290,16 +327,13 @@ function guestRecordFromRow_(row) {
   return {
     guestId: String(row[GUEST_COL['賓客ID']] || '').trim(),
     displayName: String(row[GUEST_COL['顯示姓名']] || '').trim(),
-    group: String(row[GUEST_COL['分組']] || '').trim(),
     side: String(row[GUEST_COL['新郎/新娘方']] || '').trim(),
     tableNo: String(row[GUEST_COL['桌號']] || '').trim(),
     expectedCount: Number(row[GUEST_COL['預計人數']] || 0),
     actualCount: Number(row[GUEST_COL['實到人數']] || 0),
     status: String(row[GUEST_COL['報到狀態']] || '').trim(),
     checkedInAt: row[GUEST_COL['報到時間']] || null,
-    operator: String(row[GUEST_COL['操作人員']] || '').trim(),
-    station: String(row[GUEST_COL['報到站台']] || '').trim(),
-    attendanceStatus: String(row[GUEST_COL['出席確認']] || '').trim()
+    operator: String(row[GUEST_COL['操作人員']] || '').trim()
   };
 }
 
@@ -377,7 +411,7 @@ function parseApiPayload_(e) {
     operator: String(payload.operator || '').trim(),
     station: String(payload.station || '').trim(),
     query: String(payload.query || '').trim(),
-    group: String(payload.group || '').trim(),
+    side: String(payload.side || '').trim(),
     sessionToken: String(payload.sessionToken || '').trim(),
     requestId: String(payload.requestId || '').trim()
   };
@@ -451,7 +485,7 @@ function handleApiLookup_(payload, now) {
   });
   const result = module.search({
     query: payload.query,
-    group: payload.group
+    side: payload.side
   });
   return Object.assign({}, result, {
     processedAt: formatDate_(now),
@@ -598,36 +632,34 @@ function createGuestLookupModule_(dependencies) {
     search(request) {
       const input = request || {};
       const query = String(input.query || '').trim();
-      const group = String(input.group || '').trim();
+      const side = String(input.side || '').trim();
       if (!query) {
         return {
           ok: false,
           status: 'EMPTY_LOOKUP',
           query,
-          group,
+          side,
           results: [],
           hasMore: false,
           message: '請輸入姓名或稱呼'
         };
       }
-      const matches = guestStore.search(query, group);
+      const matches = guestStore.search(query, side);
       const hasMore = matches.length > maxResults;
       const results = matches.slice(0, maxResults).map(guest => ({
         guestId: guest.guestId,
         displayName: guest.displayName,
-        group: guest.group,
         side: guest.side,
         tableNo: guest.tableNo,
         expectedCount: guest.expectedCount,
         checkInStatus: guest.status,
-        checkedInAt: guest.checkedInAt,
-        attendanceStatus: guest.attendanceStatus
+        checkedInAt: guest.checkedInAt
       }));
       return {
         ok: true,
         status: results.length ? 'LOOKUP_RESULTS' : 'NO_MATCHES',
         query,
-        group,
+        side,
         results,
         hasMore,
         message: results.length ? '' : '找不到符合的賓客'
@@ -700,8 +732,7 @@ function createCheckInModule_(dependencies) {
             actualCount,
             status: '已報到',
             checkedInAt,
-            operator: input.operator || '',
-            station: input.station || ''
+            operator: input.operator || ''
           });
 
           return {
