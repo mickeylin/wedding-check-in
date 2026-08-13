@@ -129,7 +129,7 @@ function doGet(e) {
     payload = {
       action: 'lookup',
       query: String(params.query || '').trim(),
-      side: String(params.side || '').trim(),
+      category: String(params.category || params.side || '').trim(),
       sessionToken: String(params.sessionToken || '').trim(),
       requestId: String(params.requestId || '').trim()
     };
@@ -280,12 +280,12 @@ function createGoogleSheetsGuestStore_(ss) {
       const found = findGuestById_(ss, guestId);
       return found ? guestRecordFromRow_(found.row) : null;
     },
-    search(query, side) {
+    search(query, category) {
       const sheet = getRequiredSheet_(ss, 'Guests');
       const lastRow = sheet.getLastRow();
       if (lastRow < 2) return [];
       const normalizedQuery = normalizeLookupText_(query);
-      const normalizedSide = normalizeLookupText_(side);
+      const filterCategories = lookupCategoriesForFilter_(category);
       const rows = sheet
         .getRange(2, 1, lastRow - 1, GUEST_HEADERS.length)
         .getValues();
@@ -293,7 +293,8 @@ function createGoogleSheetsGuestStore_(ss) {
         .map(guestRecordFromRow_)
         .filter(guest => {
           if (!guest.displayName) return false;
-          if (normalizedSide && !normalizeLookupText_(guest.side).includes(normalizedSide)) {
+          if (filterCategories.length
+            && filterCategories.indexOf(normalizeLookupText_(guest.category)) === -1) {
             return false;
           }
           const name = normalizeLookupText_(guest.displayName);
@@ -327,7 +328,7 @@ function guestRecordFromRow_(row) {
   return {
     guestId: String(row[GUEST_COL['賓客ID']] || '').trim(),
     displayName: String(row[GUEST_COL['顯示姓名']] || '').trim(),
-    side: String(row[GUEST_COL['新郎/新娘方']] || '').trim(),
+    category: String(row[GUEST_COL['新郎/新娘方']] || '').trim(),
     tableNo: String(row[GUEST_COL['桌號']] || '').trim(),
     expectedCount: Number(row[GUEST_COL['預計人數']] || 0),
     actualCount: Number(row[GUEST_COL['實到人數']] || 0),
@@ -411,7 +412,7 @@ function parseApiPayload_(e) {
     operator: String(payload.operator || '').trim(),
     station: String(payload.station || '').trim(),
     query: String(payload.query || '').trim(),
-    side: String(payload.side || '').trim(),
+    category: String(payload.category || payload.side || '').trim(),
     sessionToken: String(payload.sessionToken || '').trim(),
     requestId: String(payload.requestId || '').trim()
   };
@@ -485,7 +486,7 @@ function handleApiLookup_(payload, now) {
   });
   const result = module.search({
     query: payload.query,
-    side: payload.side
+    category: payload.category
   });
   return Object.assign({}, result, {
     processedAt: formatDate_(now),
@@ -580,6 +581,27 @@ function shouldAppendScanLog_(status) {
 function normalizeLookupText_(value) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, '');
 }
+function lookupCategoriesForFilter_(category) {
+  const normalizedCategory = normalizeLookupText_(category);
+  if (!normalizedCategory) return [];
+
+  if (normalizedCategory === normalizeLookupText_('男方朋友')
+    || normalizedCategory === normalizeLookupText_('女方朋友')) {
+    return [normalizedCategory, normalizeLookupText_('共同朋友')];
+  }
+
+  // 保留舊版頁面送出的三種概略值，讓前後端分開部署時不會暫時失效。
+  const legacyCategoryMap = {
+    [normalizeLookupText_('男方')]: ['男方家人', '男方朋友', '男方同事'],
+    [normalizeLookupText_('女方')]: ['女方家人', '女方媽媽同事', '女方朋友', '女方同事'],
+    [normalizeLookupText_('共同')]: ['共同朋友']
+  };
+  if (legacyCategoryMap[normalizedCategory]) {
+    return legacyCategoryMap[normalizedCategory].map(value => normalizeLookupText_(value));
+  }
+
+  return [normalizedCategory];
+}
 function extractGuestId_(rawScan) {
   const value = String(rawScan || '').trim();
   if (!value) return '';
@@ -632,24 +654,24 @@ function createGuestLookupModule_(dependencies) {
     search(request) {
       const input = request || {};
       const query = String(input.query || '').trim();
-      const side = String(input.side || '').trim();
+      const category = String(input.category || input.side || '').trim();
       if (!query) {
         return {
           ok: false,
           status: 'EMPTY_LOOKUP',
           query,
-          side,
+          category,
           results: [],
           hasMore: false,
           message: '請輸入姓名或稱呼'
         };
       }
-      const matches = guestStore.search(query, side);
+      const matches = guestStore.search(query, category);
       const hasMore = matches.length > maxResults;
       const results = matches.slice(0, maxResults).map(guest => ({
         guestId: guest.guestId,
         displayName: guest.displayName,
-        side: guest.side,
+        category: guest.category,
         tableNo: guest.tableNo,
         expectedCount: guest.expectedCount,
         checkInStatus: guest.status,
@@ -659,7 +681,7 @@ function createGuestLookupModule_(dependencies) {
         ok: true,
         status: results.length ? 'LOOKUP_RESULTS' : 'NO_MATCHES',
         query,
-        side,
+        category,
         results,
         hasMore,
         message: results.length ? '' : '找不到符合的賓客'
@@ -667,7 +689,6 @@ function createGuestLookupModule_(dependencies) {
     }
   };
 }
-
 function createCheckInModule_(dependencies) {
   const guestStore = dependencies.guestStore;
   const lock = dependencies.lock;

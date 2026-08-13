@@ -15,7 +15,7 @@ const elements = {
   manualGuestId: document.querySelector('#manualGuestId'),
   lookupForm: document.querySelector('#lookupForm'),
   lookupQuery: document.querySelector('#lookupQuery'),
-  lookupSide: document.querySelector('#lookupSide'),
+  lookupCategory: document.querySelector('#lookupCategory'),
   lookupStatus: document.querySelector('#lookupStatus'),
   lookupResults: document.querySelector('#lookupResults'),
   resultBox: document.querySelector('#resultBox'),
@@ -158,7 +158,7 @@ function pruneRecentGuestIds(now) {
 async function searchGuests() {
   if (!validateSettings()) return;
   const query = elements.lookupQuery.value.trim();
-  const side = elements.lookupSide.value.trim();
+  const category = elements.lookupCategory.value.trim();
   if (!query) {
     elements.lookupStatus.textContent = '請輸入姓名或稱呼。';
     elements.lookupResults.replaceChildren();
@@ -168,18 +168,18 @@ async function searchGuests() {
   elements.lookupStatus.textContent = '查找中⋯';
   elements.lookupResults.replaceChildren();
   try {
-    const data = await jsonpLookup(getSettings(), query, side);
+    const data = await jsonpLookup(getSettings(), query, category);
     renderLookupResults(data);
   } catch (err) {
     elements.lookupStatus.textContent = '查找失敗：' + messageOf(err);
   }
 }
 
-function jsonpLookup(settings, query, side) {
+function jsonpLookup(settings, query, category) {
   return jsonpRequest(settings, {
     action: 'lookup',
     query,
-    side,
+    category,
     sessionToken: settings.sessionToken || readSessionToken(),
     requestId: createRequestId()
   });
@@ -332,18 +332,18 @@ function renderLookupResults(data) {
   }
   elements.lookupStatus.textContent = result.hasMore
     ? '找到前 ' + results.length + ' 筆，請輸入更完整的姓名。'
-    : '找到 ' + results.length + ' 筆，請確認姓名與新郎／新娘方。';
+    : '找到 ' + results.length + ' 筆，請確認姓名與關係分類。';
   results.forEach(guest => {
     const isCheckedIn = guest.checkInStatus === '已報到';
     const card = document.createElement('article');
     card.className = 'lookup-card' + (isCheckedIn ? ' is-checked-in' : '');
-    const sideText = guest.side ? '新郎／新娘方 ' + guest.side : '新郎／新娘方未填寫';
+    const categoryText = guest.category ? '關係分類 ' + guest.category : '關係分類未填寫';
     const tableText = guest.tableNo ? '桌號 ' + guest.tableNo : '桌號尚未分配';
     const checkInText = isCheckedIn ? '已報到' : '尚未報到';
     card.innerHTML = [
       '<div class="lookup-card-title">' + escapeHtml(guest.displayName || '未命名賓客') + '</div>',
       '<div class="lookup-card-meta">',
-      '<span>' + escapeHtml(sideText) + '</span>',
+      '<span>' + escapeHtml(categoryText) + '</span>',
       '<span>' + escapeHtml(tableText) + ' / 預計 ' + escapeHtml(guest.expectedCount || 0) + ' 人</span>',
       '<span>' + escapeHtml(checkInText) + '</span>',
       '</div>'
@@ -362,7 +362,7 @@ function renderLookupResults(data) {
       const confirmation = [
         '確認是這位賓客嗎？',
         '姓名：' + (guest.displayName || '未命名賓客'),
-        '新郎／新娘方：' + (guest.side || '未填寫'),
+        '關係分類：' + (guest.category || '未填寫'),
         tableText
       ].join('\\n');
       if (window.confirm(confirmation)) {

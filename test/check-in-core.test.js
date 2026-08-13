@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 function loadCodeGs(overrides = {}) {
   const codePath = path.join(__dirname, '..', 'Code.gs');
-  const code = `${fs.readFileSync(codePath, 'utf8')}\nthis.__testExports = { createCheckInModule_, createGuestLookupModule_, handleApiSession_, verifySessionToken_ };`;
+  const code = `${fs.readFileSync(codePath, 'utf8')}\nthis.__testExports = { createCheckInModule_, createGuestLookupModule_, handleApiSession_, verifySessionToken_, lookupCategoriesForFilter_ };`;
   const context = { ...overrides };
   vm.runInNewContext(code, context, { filename: codePath });
   return context.__testExports;
@@ -21,7 +21,7 @@ function createInMemoryDependencies() {
       expectedCount: 2,
       actualCount: 0,
       status: '',
-      side: '男方',
+      category: '男方朋友',
       checkedInAt: null,
       operator: ''
     }]
@@ -40,14 +40,14 @@ function createInMemoryDependencies() {
       findById(guestId) {
         return guests.get(guestId) || null;
       },
-      search(query, side) {
+      search(query, category) {
         const normalizedQuery = String(query || '').trim().toLowerCase();
-        const normalizedSide = String(side || '').trim().toLowerCase();
+        const normalizedCategory = String(category || '').trim().toLowerCase();
         return [...guests.values()].filter(guest => {
           const matchesQuery = guest.displayName.toLowerCase().includes(normalizedQuery)
             || guest.guestId.toLowerCase().includes(normalizedQuery);
-          const matchesSide = !normalizedSide || guest.side.toLowerCase().includes(normalizedSide);
-          return matchesQuery && matchesSide;
+          const matchesCategory = !normalizedCategory || [guest.category, normalizedCategory === '男方朋友' || normalizedCategory === '女方朋友' ? '共同朋友' : ''].some(value => value.toLowerCase() === normalizedCategory);
+          return matchesQuery && matchesCategory;
         });
       },
       markCheckedIn(guestId, update) {
@@ -228,7 +228,7 @@ test('Guests 寫入成功但 ScanLog 失敗時仍回傳 CHECKED_IN', () => {
   assert.equal(result.warnings[0], 'SCAN_LOG_FAILED');
   assert.equal(dependencies.guests.get('G001').status, '已報到');
 });
-test('姓名查找會回傳桌號與新郎／新娘方', () => {
+test('姓名查找會回傳桌號與關係分類', () => {
   const { createGuestLookupModule_ } = loadCodeGs();
   const dependencies = createInMemoryDependencies();
   const lookup = createGuestLookupModule_({
@@ -236,16 +236,23 @@ test('姓名查找會回傳桌號與新郎／新娘方', () => {
     maxResults: 20
   });
 
-  const result = lookup.search({ query: '王', side: '男方' });
+  const result = lookup.search({ query: '王', category: '男方朋友' });
 
   assert.equal(result.status, 'LOOKUP_RESULTS');
   assert.equal(result.ok, true);
   assert.equal(result.results.length, 1);
   assert.equal(result.results[0].guestId, 'G001');
   assert.equal(result.results[0].tableNo, '8');
-  assert.equal(result.results[0].side, '男方');
+  assert.equal(result.results[0].category, '男方朋友');
 });
 
+test('朋友分類查找會包含共同朋友，其他分類維持精確比對', () => {
+  const { lookupCategoriesForFilter_ } = loadCodeGs();
+  assert.deepEqual(Array.from(lookupCategoriesForFilter_('男方朋友')), ['男方朋友', '共同朋友']);
+  assert.deepEqual(Array.from(lookupCategoriesForFilter_('女方朋友')), ['女方朋友', '共同朋友']);
+  assert.deepEqual(Array.from(lookupCategoriesForFilter_('男方家人')), ['男方家人']);
+  assert.deepEqual(Array.from(lookupCategoriesForFilter_('共同朋友')), ['共同朋友']);
+});
 test('姓名查找要求查詢字串且找不到時不回傳資料', () => {
   const { createGuestLookupModule_ } = loadCodeGs();
   const dependencies = createInMemoryDependencies();

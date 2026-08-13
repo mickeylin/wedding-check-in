@@ -60,17 +60,22 @@ GitHub Pages 掃描頁
 目前名單 CSV 的欄位可這樣放入 `Guests`：
 
 - `Name` → `顯示姓名`
-- `分類` → `新郎/新娘方`：
-  - `男方家人`、`男方朋友`、`男方同事` → `男方`
-  - `女方家人`、`女方媽媽同事`、`女方朋友`、`女方同事` → `女方`
-  - `共同朋友` → `共同`
+- `分類` → `新郎/新娘方`，保留 CSV 的完整分類值：
+  - `男方家人`
+  - `男方朋友`
+  - `共同朋友`
+  - `男方同事`
+  - `女方家人`
+  - `女方媽媽同事`
+  - `女方朋友`
+  - `女方同事`
 - `人數` → `預計人數`
 - `備註` → `備註`（若有需要保留現場提醒）
 - `桌號`：座位安排確認後填入，查找頁會直接顯示。
 - `賓客ID`：不要從 CSV 自行編號，執行 `generateGuestIds` 產生。
 - `素食`、`喜餅`、`確認`：不匯入 `Guests`。
 
-手機查找使用「姓名＋新郎／新娘方」。這份名單沒有手機末四碼或推薦人，因此不需要其他查找欄位。
+手機查找使用「姓名＋關係分類」。選 `男方朋友` 或 `女方朋友` 時，結果會額外包含 `共同朋友`；其他分類採精確比對。這份名單沒有手機末四碼或推薦人，因此不需要其他查找欄位。
 
 最安全做法：先把 CSV 匯入另一個暫存分頁，再依上述欄位複製到 `Guests` 對應欄位；不要把 7 欄 CSV 整段貼到 `Guests` 的 A1，避免欄位錯位。
 
@@ -172,9 +177,9 @@ QR Code 只放 `賓客ID`，不要把 API URL、PIN 或桌號編進 QR。
 5. 按「儲存設定」。PIN 只會用來建立短期 session，不會被持久儲存。
 6. 按「開始掃描」並允許相機權限。
 7. 掃到 QR 後，頁面會顯示報到成功、重複報到或找不到賓客 ID。
-8. 如果沒有 QR，打開「沒有 QR？用姓名查找」，輸入賓客在名單上的姓名或稱呼，可選男方、女方或共同；確認姓名、新郎／新娘方與桌號後按「報到」。
+8. 如果沒有 QR，打開「沒有 QR？用姓名查找」，輸入賓客在名單上的姓名或稱呼，再選擇 CSV 的關係分類；選「男方朋友」或「女方朋友」會一併包含「共同朋友」，確認姓名、分類與桌號後按「報到」。
 
-沒有 QR 時，工作人員可直接在同一頁的「沒有 QR？用姓名查找」輸入姓名／稱呼並選擇新郎／新娘方。選到正確結果後仍會呼叫同一個 check-in 流程，不會繞過 session、lock 或 `ScanLog`。
+沒有 QR 時，工作人員可直接在同一頁的「沒有 QR？用姓名查找」輸入姓名／稱呼並選擇關係分類。選到正確結果後仍會呼叫同一個 check-in 流程，不會繞過 session、lock 或 `ScanLog`。
 
 掃描頁送出報到 API 時不會暫停相機，可以連續掃下一位。第一次開始掃描或手動報到時，頁面會先以 PIN 換取綁定站台與操作人員的短期 session token；後續 check-in 只送 token，後端不信任前端每次請求附帶的 operator/station。為避免同一張 QR 留在鏡頭內造成重複送出，同一個賓客 ID 會有短暫冷卻，且同時最多保留 3 筆送出中的報到請求。
 
@@ -197,7 +202,7 @@ GitHub Pages 預設使用 JSONP，先建立 session，再送出 check-in：
 ```text
 GET WEB_APP_URL?action=session&pin=...&station=...&operator=...&callback=...
 GET WEB_APP_URL?action=checkin&guestId=賓客ID&sessionToken=...&requestId=...&callback=...
-GET WEB_APP_URL?action=lookup&query=姓名或稱呼&side=男方&sessionToken=...&requestId=...&callback=...
+GET WEB_APP_URL?action=lookup&query=姓名或稱呼&category=男方朋友&sessionToken=...&requestId=...&callback=...
 ```
 
 Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 CORS 的後端：
