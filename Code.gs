@@ -27,6 +27,8 @@ const SCAN_LOG_HEADERS = [
 ];
 
 const API_STATION_NAME = 'GitHubPages';
+const SESSION_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
+const SESSION_PROPERTY_PREFIX = 'CHECKIN_SESSION_';
 const GUEST_COL = columnMap_(GUEST_HEADERS);
 
 /**
@@ -101,98 +103,43 @@ function doPost(e) {
   const now = new Date();
   try {
     const payload = parseApiPayload_(e);
-    return jsonResponse_(handleApiCheckin_(payload, now));
+    return jsonResponse_(safeApiCall_(payload, now));
   } catch (err) {
-    return jsonResponse_({
-      ok: false,
-      status: 'ERROR',
-      message: err && err.message ? err.message : String(err),
-      processedAt: formatDate_(now)
-    });
+    return jsonResponse_(errorResponse_(err, now));
   }
 }
 
 function doGet(e) {
   const now = new Date();
   const params = e && e.parameter ? e.parameter : {};
+  let payload = null;
 
-  if (params.action === 'checkin') {
-    const payload = {
-      action: 'checkin',
-      guestId: String(params.guestId || params.token || params.t || '').trim(),
+  if (params.action === 'session') {
+    payload = {
+      action: 'session',
       pin: String(params.pin || '').trim(),
       operator: String(params.operator || '').trim(),
       station: String(params.station || '').trim()
     };
-    const body = safeApiCall_(payload, now);
-    return params.callback
-      ? jsonpResponse_(params.callback, body)
-      : jsonResponse_(body);
+  } else if (params.action === 'checkin') {
+    payload = {
+      action: 'checkin',
+      guestId: String(params.guestId || params.t || params.token || '').trim(),
+      sessionToken: String(params.sessionToken || '').trim(),
+      requestId: String(params.requestId || '').trim()
+    };
+  } else {
+    return jsonResponse_({
+      ok: true,
+      service: 'wedding-check-in-api',
+      message: 'API is running'
+    });
   }
 
-  return jsonResponse_({
-    ok: true,
-    service: 'wedding-check-in-api',
-    message: 'API is running'
-  });
-}
-
-function processScan_(ss, stationName, rawScan, now, operator) {
-  const guestIdInput = extractGuestId_(rawScan);
-  if (!guestIdInput) {
-    return scanResult_('EMPTY_SCAN', '', '', '', '沒有掃描內容');
-  }
-
-  const result = findGuestById_(ss, guestIdInput);
-  if (!result) {
-    return scanResult_('NOT_FOUND', '', '', '', `找不到賓客 ID：${guestIdInput}`);
-  }
-
-  const { sheet, rowNumber, row } = result;
-  const guestId = String(row[GUEST_COL['賓客ID']] || '');
-  const displayName = String(row[GUEST_COL['顯示姓名']] || '');
-  const tableNo = String(row[GUEST_COL['桌號']] || '');
-  const wasCheckedIn = String(row[GUEST_COL['報到狀態']] || '').trim() === '已報到';
-
-  if (wasCheckedIn) {
-    const checkinTime = formatDate_(row[GUEST_COL['報到時間']]);
-    const message = checkinTime ? `已報到，原報到時間：${checkinTime}` : '已報到';
-    return scanResult_('ALREADY_CHECKED_IN', guestId, displayName, tableNo, message);
-  }
-
-  const existingActualCount = Number(row[GUEST_COL['實到人數']] || 0);
-  const expectedCount = Number(row[GUEST_COL['預計人數']] || 0);
-  const actualCount = existingActualCount || expectedCount || 1;
-
-  sheet.getRange(rowNumber, GUEST_COL['實到人數'] + 1, 1, 5)
-    .setValues([[
-      actualCount,
-      '已報到',
-      operator,
-      now,
-      stationName
-    ]]);
-
-  return scanResult_('CHECKED_IN', guestId, displayName, tableNo, '報到成功');
-}
-
-function scanResult_(status, guestId, displayName, tableNo, message) {
-  return { status, guestId, displayName, tableNo, message };
-}
-
-function appendScanLog_(ss, stationName, rawScan, result, operator, now) {
-  const sheet = getRequiredSheet_(ss, 'ScanLog');
-  sheet.appendRow([
-    now,
-    stationName,
-    rawScan,
-    result.status,
-    result.guestId,
-    result.displayName,
-    result.tableNo,
-    result.message,
-    operator
-  ]);
+  const body = safeApiCall_(payload, now);
+  return params.callback
+    ? jsonpResponse_(params.callback, body)
+    : jsonResponse_(body);
 }
 
 function findGuestById_(ss, guestId) {
@@ -280,64 +227,242 @@ function headerMap_(headerRow, expectedHeaders) {
   return map;
 }
 
+function createGoogleSheetsGuestStore_(ss) {
+  return {
+    findById(guestId) {
+      const found = findGuestById_(ss, guestId);
+      if (!found) return null;
+
+      const row = found.row;
+      return {
+        guestId: String(row[GUEST_COL['賓客ID']] || '').trim(),
+        displayName: String(row[GUEST_COL['顯示姓名']] || '').trim(),
+        tableNo: String(row[GUEST_COL['桌號']] || '').trim(),
+        expectedCount: Number(row[GUEST_COL['預計人數']] || 0),
+        actualCount: Number(row[GUEST_COL['實到人數']] || 0),
+        status: String(row[GUEST_COL['報到狀態']] || '').trim(),
+        checkedInAt: row[GUEST_COL['報到時間']] || null,
+        operator: String(row[GUEST_COL['操作人員']] || '').trim(),
+        station: String(row[GUEST_COL['報到站台']] || '').trim()
+      };
+    },
+
+    markCheckedIn(guestId, update) {
+      const found = findGuestById_(ss, guestId);
+      if (!found) {
+        throw apiError_('NOT_FOUND', '找不到要更新的賓客');
+      }
+
+      found.sheet
+        .getRange(found.rowNumber, GUEST_COL['實到人數'] + 1, 1, 5)
+        .setValues([[
+          Number(update.actualCount) || 1,
+          update.status,
+          update.operator || '',
+          update.checkedInAt,
+          update.station || ''
+        ]]);
+    }
+  };
+}
+
+function createGoogleSheetsScanLog_(ss) {
+  return {
+    record(entry) {
+      const sheet = getRequiredSheet_(ss, 'ScanLog');
+      sheet.appendRow([
+        entry.recordedAt,
+        entry.station || '',
+        entry.rawScan || entry.guestId || '',
+        entry.status,
+        entry.guestId || '',
+        entry.displayName || '',
+        entry.tableNo || '',
+        entry.message || '',
+        entry.operator || ''
+      ]);
+    }
+  };
+}
+
+function createScriptLock_(timeoutMs) {
+  const waitMs = Number(timeoutMs) || 5000;
+
+  return {
+    runExclusive(callback) {
+      const scriptLock = LockService.getScriptLock();
+      if (!scriptLock.tryLock(waitMs)) {
+        throw apiError_('BUSY', '系統忙碌，請稍後再試');
+      }
+
+      try {
+        return callback();
+      } finally {
+        scriptLock.releaseLock();
+      }
+    }
+  };
+}
+
+function createProductionCheckInModule_(ss) {
+  return createCheckInModule_({
+    guestStore: createGoogleSheetsGuestStore_(ss),
+    scanLog: createGoogleSheetsScanLog_(ss),
+    lock: createScriptLock_(5000),
+    clock: () => new Date(),
+    formatDate: formatDate_,
+    shouldLogSuccessCheckIns: () => shouldAppendScanLog_('CHECKED_IN')
+  });
+}
+
 function parseApiPayload_(e) {
   const raw = e && e.postData && e.postData.contents ? e.postData.contents : '{}';
-  const payload = JSON.parse(raw);
+  let payload;
+
+  try {
+    payload = JSON.parse(raw);
+  } catch (err) {
+    throw apiError_('BAD_REQUEST', '請提供有效的 JSON payload');
+  }
+
   return {
     action: String(payload.action || 'checkin').trim(),
     guestId: String(payload.guestId || payload.token || payload.scan || '').trim(),
     pin: String(payload.pin || '').trim(),
     operator: String(payload.operator || '').trim(),
-    station: String(payload.station || '').trim()
+    station: String(payload.station || '').trim(),
+    sessionToken: String(payload.sessionToken || '').trim(),
+    requestId: String(payload.requestId || '').trim()
   };
 }
 
 function safeApiCall_(payload, now) {
   try {
-    return handleApiCheckin_(payload, now);
+    if (payload.action === 'session') {
+      return Object.assign({}, handleApiSession_(payload, now), {
+        processedAt: formatDate_(now)
+      });
+    }
+
+    if (payload.action === 'checkin') {
+      return handleApiCheckin_(payload, now);
+    }
+
+    throw apiError_('BAD_REQUEST', '不支援的 API action');
   } catch (err) {
-    return {
-      ok: false,
-      status: 'ERROR',
-      message: err && err.message ? err.message : String(err),
-      processedAt: formatDate_(now)
-    };
+    return errorResponse_(err, now);
   }
 }
 
+function errorResponse_(err, now) {
+  const status = err && err.code ? err.code : 'ERROR';
+  return {
+    ok: false,
+    status,
+    message: err && err.message ? err.message : String(err),
+    processedAt: formatDate_(now),
+    retryable: status === 'BUSY'
+  };
+}
+
 function handleApiCheckin_(payload, now) {
-  verifyApiPin_(payload.pin);
-
   if (payload.action !== 'checkin') {
-    throw new Error('不支援的 API action');
+    throw apiError_('BAD_REQUEST', '不支援的 API action');
   }
 
+  const session = verifySessionToken_(payload.sessionToken, now);
   const ss = getSpreadsheet_();
-  const stationName = payload.station || API_STATION_NAME;
-  const operator = payload.operator || getScanOperator_();
-  const result = processScan_(ss, stationName, payload.guestId, now, operator);
-  if (shouldAppendScanLog_(result.status)) {
-    appendScanLog_(ss, stationName, payload.guestId, result, operator, now);
+  const module = createProductionCheckInModule_(ss);
+  const result = module.attempt({
+    guestId: extractGuestId_(payload.guestId),
+    rawScan: payload.guestId,
+    operator: session.operator,
+    station: session.station,
+    requestId: payload.requestId || '',
+    observedAt: now
+  });
+
+  return Object.assign({}, result, {
+    processedAt: formatDate_(now),
+    requestId: payload.requestId || ''
+  });
+}
+
+function apiError_(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function normalizeApiTime_(value) {
+  return value instanceof Date ? value : new Date(value || new Date());
+}
+
+function handleApiSession_(payload, now) {
+  const input = payload || {};
+  const currentTime = normalizeApiTime_(now);
+  verifyApiPin_(input.pin);
+
+  const operator = String(input.operator || '').trim();
+  if (!operator) {
+    throw apiError_('INVALID_SESSION', '請輸入操作人員');
   }
+  const station = String(input.station || API_STATION_NAME).trim() || API_STATION_NAME;
+  const sessionToken = Utilities.getUuid();
+  const expiresAt = currentTime.getTime() + SESSION_TOKEN_TTL_MS;
+  const session = { operator, station, expiresAt };
+
+  PropertiesService.getScriptProperties().setProperty(
+    SESSION_PROPERTY_PREFIX + sessionToken,
+    JSON.stringify(session)
+  );
 
   return {
-    ok: result.status === 'CHECKED_IN' || result.status === 'ALREADY_CHECKED_IN',
-    status: result.status,
-    guestId: result.guestId,
-    displayName: result.displayName,
-    tableNo: result.tableNo,
-    message: result.message,
-    processedAt: formatDate_(now)
+    ok: true,
+    status: 'SESSION_CREATED',
+    sessionToken,
+    operator,
+    station,
+    expiresAt
   };
+}
+
+function verifySessionToken_(sessionToken, now) {
+  const token = String(sessionToken || '').trim();
+  if (!token) {
+    throw apiError_('UNAUTHORIZED', '需要 session token');
+  }
+
+  const propertyKey = SESSION_PROPERTY_PREFIX + token;
+  const raw = PropertiesService.getScriptProperties().getProperty(propertyKey);
+  if (!raw) {
+    throw apiError_('UNAUTHORIZED', 'session token 無效或已過期');
+  }
+
+  let session;
+  try {
+    session = JSON.parse(raw);
+  } catch (err) {
+    PropertiesService.getScriptProperties().deleteProperty(propertyKey);
+    throw apiError_('UNAUTHORIZED', 'session token 無效或已過期');
+  }
+
+  const currentTime = normalizeApiTime_(now);
+  if (!session.expiresAt || currentTime.getTime() >= Number(session.expiresAt)) {
+    PropertiesService.getScriptProperties().deleteProperty(propertyKey);
+    throw apiError_('UNAUTHORIZED', 'session token 已過期');
+  }
+
+  return session;
 }
 
 function verifyApiPin_(pin) {
   const expected = PropertiesService.getScriptProperties().getProperty('API_PIN');
   if (!expected) {
-    throw new Error('尚未設定 API_PIN');
+    throw apiError_('CONFIG_ERROR', '尚未設定 API_PIN');
   }
   if (String(pin || '') !== String(expected)) {
-    throw new Error('PIN 不正確');
+    throw apiError_('UNAUTHORIZED', 'PIN 不正確');
   }
 }
 
@@ -385,18 +510,153 @@ function jsonpResponse_(callbackName, payload) {
     .setMimeType(ContentService.MimeType.JAVASCRIPT);
 }
 
-function getScanOperator_() {
-  try {
-    const email = Session.getActiveUser().getEmail() || Session.getEffectiveUser().getEmail();
-    return String(email || '').trim().toLowerCase() || 'unknown';
-  } catch (err) {
-    return 'unknown';
-  }
-}
-
 function formatDate_(value) {
   if (!value) return '';
   const date = value instanceof Date ? value : new Date(value);
   if (isNaN(date.getTime())) return String(value);
   return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy/MM/dd HH:mm:ss');
+}
+
+function createCheckInModule_(dependencies) {
+  const guestStore = dependencies.guestStore;
+  const lock = dependencies.lock;
+  const clock = dependencies.clock || (() => new Date());
+  const formatDate = dependencies.formatDate || formatDate_;
+  const scanLog = dependencies.scanLog || { record() {} };
+  const shouldLogSuccessCheckIns = dependencies.shouldLogSuccessCheckIns || (() => false);
+
+  return {
+    attempt(request) {
+      const input = request || {};
+      const guestId = String(input.guestId || '').trim();
+
+      if (!guestId) {
+        const emptyResult = {
+          ok: false,
+          status: 'EMPTY_SCAN',
+          guestId: '',
+          displayName: '',
+          tableNo: '',
+          message: '沒有掃描內容'
+        };
+        return recordCheckInResult_(
+          emptyResult,
+          input,
+          scanLog,
+          shouldLogSuccessCheckIns
+        );
+      }
+
+      try {
+        const result = lock.runExclusive(() => {
+          const guest = guestStore.findById(guestId);
+          if (!guest) {
+            return {
+              ok: false,
+              status: 'NOT_FOUND',
+              guestId,
+              displayName: '',
+              tableNo: '',
+              message: '找不到賓客 ID：' + guestId
+            };
+          }
+
+          if (guest.status === '已報到') {
+            return {
+              ok: true,
+              status: 'ALREADY_CHECKED_IN',
+              guestId: guest.guestId,
+              displayName: guest.displayName,
+              tableNo: guest.tableNo,
+              checkedInAt: guest.checkedInAt ? formatDate(guest.checkedInAt) : '',
+              message: guest.checkedInAt
+                ? '已報到，原報到時間：' + formatDate(guest.checkedInAt)
+                : '已報到'
+            };
+          }
+
+          const actualCount = guest.actualCount || guest.expectedCount || 1;
+          const checkedInAt = clock();
+          guestStore.markCheckedIn(guestId, {
+            actualCount,
+            status: '已報到',
+            checkedInAt,
+            operator: input.operator || '',
+            station: input.station || ''
+          });
+
+          return {
+            ok: true,
+            status: 'CHECKED_IN',
+            guestId: guest.guestId,
+            displayName: guest.displayName,
+            tableNo: guest.tableNo,
+            actualCount,
+            checkedInAt: formatDate(checkedInAt),
+            message: '報到成功'
+          };
+        });
+
+        return recordCheckInResult_(
+          result,
+          input,
+          scanLog,
+          shouldLogSuccessCheckIns
+        );
+      } catch (err) {
+        if (err && err.code === 'BUSY') {
+          return {
+            ok: false,
+            status: 'BUSY',
+            guestId,
+            displayName: '',
+            tableNo: '',
+            message: '系統忙碌，請稍後再試'
+          };
+        }
+
+        const errorResult = {
+          ok: false,
+          status: 'ERROR',
+          guestId,
+          displayName: '',
+          tableNo: '',
+          message: err && err.message ? err.message : String(err)
+        };
+        return recordCheckInResult_(
+          errorResult,
+          input,
+          scanLog,
+          shouldLogSuccessCheckIns
+        );
+      }
+    }
+  };
+}
+
+function recordCheckInResult_(result, request, scanLog, shouldLogSuccessCheckIns) {
+  try {
+    if (result.status === 'CHECKED_IN' && !shouldLogSuccessCheckIns()) {
+      return result;
+    }
+
+    scanLog.record({
+      requestId: request.requestId || '',
+      rawScan: request.rawScan || request.guestId || '',
+      guestId: result.guestId,
+      status: result.status,
+      displayName: result.displayName,
+      tableNo: result.tableNo,
+      message: result.message,
+      operator: request.operator || '',
+      station: request.station || '',
+      recordedAt: request.observedAt || new Date()
+    });
+    return result;
+  } catch (err) {
+    return Object.assign({}, result, {
+      warnings: ['SCAN_LOG_FAILED'],
+      warning: err && err.message ? err.message : String(err)
+    });
+  }
 }

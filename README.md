@@ -5,7 +5,7 @@
 這版提供「手機瀏覽器連續掃 QR」流程：
 
 - GitHub Pages：工作人員掃描頁，使用手機相機讀 QR Code。
-- Apps Script Web App：API 後端，驗證 PIN 後更新 Google Sheet。
+- Apps Script Web App：API 後端，先用 PIN 建立短期 session token，再更新 Google Sheet。
 - Google Sheet：保存賓客主檔、報到狀態、掃描紀錄與 Dashboard。
 - QR Code：只印 `賓客ID`，不要印完整 URL。
 
@@ -28,7 +28,7 @@ GitHub Pages 掃描頁
 
 - `Code.gs`：Apps Script 後端，包含 Sheet 初始化與 `doGet`/`doPost` API。
 - `docs/index.html`：GitHub Pages 掃描頁。
-- `docs/app.js`：相機掃描、PIN 設定、API 呼叫與結果顯示。
+- `docs/app.js`：相機掃描、PIN/session 設定、API 呼叫與結果顯示。
 - `docs/styles.css`：掃描頁樣式。
 - `sample_guests.csv`：賓客資料範例。
 
@@ -78,7 +78,7 @@ SPREADSHEET_ID = Google Sheet ID
 LOG_SUCCESS_CHECKINS = false
 ```
 
-`API_PIN` 不要寫進 GitHub Pages 程式碼。工作人員在掃描頁第一次使用時輸入，瀏覽器會存在該裝置的 localStorage。
+`API_PIN` 不要寫進 GitHub Pages 程式碼，也不會存入 localStorage。工作人員輸入後只用來換取短期 session token；token 存在該裝置的 sessionStorage，分頁關閉或到期後需重新輸入。
 
 `SPREADSHEET_ID` 是 Google Sheet 網址中 `/d/` 後面、`/edit` 前面的那段。若 Apps Script 是綁定在該 Sheet 上，通常也能直接取得 active spreadsheet；設定此值是為了 Web App 執行環境更穩。
 
@@ -149,11 +149,11 @@ QR Code 只放 `賓客ID`。
 2. 貼上 Apps Script API URL。
 3. 輸入工作人員 PIN。
 4. 輸入站台與操作人員名稱。
-5. 按「儲存設定」。
+5. 按「儲存設定」。PIN 只會用來建立短期 session，不會被持久儲存。
 6. 按「開始掃描」並允許相機權限。
 7. 掃到 QR 後，頁面會顯示報到成功、重複報到或找不到賓客 ID。
 
-掃描頁送出報到 API 時不會暫停相機，可以連續掃下一位。為避免同一張 QR 留在鏡頭內造成重複送出，同一個賓客 ID 會有短暫冷卻，且同時最多保留 3 筆送出中的報到請求。
+掃描頁送出報到 API 時不會暫停相機，可以連續掃下一位。第一次開始掃描或手動報到時，頁面會先以 PIN 換取綁定站台與操作人員的短期 session token；後續 check-in 只送 token，後端不信任前端每次請求附帶的 operator/station。為避免同一張 QR 留在鏡頭內造成重複送出，同一個賓客 ID 會有短暫冷卻，且同時最多保留 3 筆送出中的報到請求。
 
 掃描成功時，Apps Script 會更新 `Guests`：
 
@@ -165,23 +165,34 @@ QR Code 只放 `賓客ID`。
 
 預設只有重複報到、找不到賓客 ID、錯誤等狀態會追加到 `ScanLog`。若 `LOG_SUCCESS_CHECKINS=true`，成功報到也會寫入 `ScanLog`。
 
+`BUSY` 是 lock 未取得時的 fail-closed 結果，不追加 `ScanLog`，避免忙碌時再產生 Sheet 寫入。
+
 ## API
 
-GitHub Pages 預設使用 JSONP：
+GitHub Pages 預設使用 JSONP，先建立 session，再送出 check-in：
 
 ```text
-GET WEB_APP_URL?action=checkin&guestId=賓客ID&pin=...&station=...&operator=...&callback=...
+GET WEB_APP_URL?action=session&pin=...&station=...&operator=...&callback=...
+GET WEB_APP_URL?action=checkin&guestId=賓客ID&sessionToken=...&requestId=...&callback=...
 ```
 
 Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 CORS 的後端：
 
 ```json
 {
-  "action": "checkin",
-  "guestId": "G023",
+  "action": "session",
   "pin": "工作人員PIN",
   "station": "入口A",
   "operator": "小美"
+}
+```
+
+```json
+{
+  "action": "checkin",
+  "guestId": "G023",
+  "sessionToken": "短期 session token",
+  "requestId": "req-001"
 }
 ```
 
@@ -211,9 +222,11 @@ Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 COR
 6. `ScanLog` 會記錄重複報到、找不到賓客 ID 與錯誤；若 `LOG_SUCCESS_CHECKINS=true`，成功報到也會新增紀錄。
 7. 兩台手機同時掃不同賓客，都能成功寫回 `Guests`。
 8. PIN 錯誤時不會更新 Sheet。
+9. lock 忙碌時回傳 `BUSY` 且不寫入；斷網或 timeout 時前端不建立本地待同步佇列。
 
 ## 安全注意事項
 
 - `API_PIN` 是現場操作防線，不是高強度帳號系統。
+- session token 只短期有效，且只存於瀏覽器 sessionStorage；婚宴結束後仍建議停用 Web App 部署或更換 `API_PIN`。
 - 不要把 PIN 寫死在 `docs/app.js` 或公開文件。
 - 婚宴結束後建議停用 Apps Script Web App 部署，或刪除 / 更換 `API_PIN`。
