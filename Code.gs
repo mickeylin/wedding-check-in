@@ -12,9 +12,7 @@ const GUEST_HEADERS = [
   '報到時間',
   '報到站台',
   '備註',
-  '出席確認',
-  '素食',
-  '喜餅'
+  '出席確認'
 ];
 
 const SCAN_LOG_HEADERS = [
@@ -301,9 +299,7 @@ function guestRecordFromRow_(row) {
     checkedInAt: row[GUEST_COL['報到時間']] || null,
     operator: String(row[GUEST_COL['操作人員']] || '').trim(),
     station: String(row[GUEST_COL['報到站台']] || '').trim(),
-    attendanceStatus: String(row[GUEST_COL['出席確認']] || '').trim(),
-    vegetarian: String(row[GUEST_COL['素食']] || '').trim(),
-    weddingGiftCount: Number(row[GUEST_COL['喜餅']] || 0)
+    attendanceStatus: String(row[GUEST_COL['出席確認']] || '').trim()
   };
 }
 
