@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 function loadCodeGs(overrides = {}) {
   const codePath = path.join(__dirname, '..', 'Code.gs');
-  const code = `${fs.readFileSync(codePath, 'utf8')}\nthis.__testExports = { createCheckInModule_, handleApiSession_, verifySessionToken_ };`;
+  const code = `${fs.readFileSync(codePath, 'utf8')}\nthis.__testExports = { createCheckInModule_, createGuestLookupModule_, handleApiSession_, verifySessionToken_ };`;
   const context = { ...overrides };
   vm.runInNewContext(code, context, { filename: codePath });
   return context.__testExports;
@@ -21,6 +21,9 @@ function createInMemoryDependencies() {
       expectedCount: 2,
       actualCount: 0,
       status: '',
+      group: '男方朋友',
+      side: '男方',
+      attendanceStatus: '會參加',
       checkedInAt: null,
       operator: '',
       station: ''
@@ -39,6 +42,16 @@ function createInMemoryDependencies() {
     guestStore: {
       findById(guestId) {
         return guests.get(guestId) || null;
+      },
+      search(query, group) {
+        const normalizedQuery = String(query || '').trim().toLowerCase();
+        const normalizedGroup = String(group || '').trim().toLowerCase();
+        return [...guests.values()].filter(guest => {
+          const matchesQuery = guest.displayName.toLowerCase().includes(normalizedQuery)
+            || guest.guestId.toLowerCase().includes(normalizedQuery);
+          const matchesGroup = !normalizedGroup || guest.group.toLowerCase().includes(normalizedGroup);
+          return matchesQuery && matchesGroup;
+        });
       },
       markCheckedIn(guestId, update) {
         const guest = guests.get(guestId);
@@ -201,6 +214,37 @@ test('Guests 寫入成功但 ScanLog 失敗時仍回傳 CHECKED_IN', () => {
   assert.equal(result.warnings.length, 1);
   assert.equal(result.warnings[0], 'SCAN_LOG_FAILED');
   assert.equal(dependencies.guests.get('G001').status, '已報到');
+});
+test('姓名查找會回傳桌號、關係與出席狀態', () => {
+  const { createGuestLookupModule_ } = loadCodeGs();
+  const dependencies = createInMemoryDependencies();
+  const lookup = createGuestLookupModule_({
+    guestStore: dependencies.guestStore,
+    maxResults: 20
+  });
+
+  const result = lookup.search({ query: '王', group: '男方' });
+
+  assert.equal(result.status, 'LOOKUP_RESULTS');
+  assert.equal(result.ok, true);
+  assert.equal(result.results.length, 1);
+  assert.equal(result.results[0].guestId, 'G001');
+  assert.equal(result.results[0].tableNo, '8');
+  assert.equal(result.results[0].group, '男方朋友');
+  assert.equal(result.results[0].attendanceStatus, '會參加');
+});
+
+test('姓名查找要求查詢字串且找不到時不回傳資料', () => {
+  const { createGuestLookupModule_ } = loadCodeGs();
+  const dependencies = createInMemoryDependencies();
+  const lookup = createGuestLookupModule_({ guestStore: dependencies.guestStore });
+  const empty = lookup.search({ query: '' });
+  const missing = lookup.search({ query: '不存在' });
+  assert.equal(empty.status, 'EMPTY_LOOKUP');
+  assert.equal(empty.ok, false);
+  assert.equal(missing.status, 'NO_MATCHES');
+  assert.equal(missing.ok, true);
+  assert.deepEqual(missing.results, []);
 });
 test("PIN exchange creates a short-lived session bound to operator and station", () => {
   const properties = new Map([["API_PIN", "1234"]]);

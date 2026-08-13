@@ -13,6 +13,11 @@ const elements = {
   stopButton: document.querySelector('#stopButton'),
   manualForm: document.querySelector('#manualForm'),
   manualGuestId: document.querySelector('#manualGuestId'),
+  lookupForm: document.querySelector('#lookupForm'),
+  lookupQuery: document.querySelector('#lookupQuery'),
+  lookupGroup: document.querySelector('#lookupGroup'),
+  lookupStatus: document.querySelector('#lookupStatus'),
+  lookupResults: document.querySelector('#lookupResults'),
   resultBox: document.querySelector('#resultBox'),
   recentList: document.querySelector('#recentList'),
   connectionStatus: document.querySelector('#connectionStatus')
@@ -45,6 +50,11 @@ elements.manualForm.addEventListener('submit', event => {
   }
   enqueueCheckin(guestId, { source: 'manual' });
   elements.manualGuestId.value = '';
+});
+
+elements.lookupForm.addEventListener('submit', event => {
+  event.preventDefault();
+  searchGuests();
 });
 
 async function startScanner() {
@@ -93,7 +103,7 @@ async function enqueueCheckin(guestId, options = {}) {
 
   const now = Date.now();
   const lastScanAt = recentGuestIdScanAt.get(guestId) || 0;
-  const isManual = options.source === 'manual';
+  const isManual = options.source !== 'scanner';
 
   if (pendingGuestIds.has(guestId)) {
     if (isManual) showResult('報到處理中', guestId + ' 已送出，請等待回應。', 'warn');
@@ -142,6 +152,36 @@ function pruneRecentGuestIds(now) {
     if (now - lastScanAt > maxAgeMs) {
       recentGuestIdScanAt.delete(guestId);
     }
+  });
+}
+
+async function searchGuests() {
+  if (!validateSettings()) return;
+  const query = elements.lookupQuery.value.trim();
+  const group = elements.lookupGroup.value.trim();
+  if (!query) {
+    elements.lookupStatus.textContent = '請輸入姓名或稱呼。';
+    elements.lookupResults.replaceChildren();
+    return;
+  }
+  if (!(await ensureSession())) return;
+  elements.lookupStatus.textContent = '查找中⋯';
+  elements.lookupResults.replaceChildren();
+  try {
+    const data = await jsonpLookup(getSettings(), query, group);
+    renderLookupResults(data);
+  } catch (err) {
+    elements.lookupStatus.textContent = '查找失敗：' + messageOf(err);
+  }
+}
+
+function jsonpLookup(settings, query, group) {
+  return jsonpRequest(settings, {
+    action: 'lookup',
+    query,
+    group,
+    sessionToken: settings.sessionToken || readSessionToken(),
+    requestId: createRequestId()
   });
 }
 
@@ -241,31 +281,102 @@ function jsonpRequest(settings, params) {
   });
 }
 
+function handleUnauthorized(message) {
+  clearSessionToken();
+  updateConnectionStatus();
+  showResult('工作階段已過期', message || '請重新輸入 PIN 後再試。', 'warn');
+}
+
 function renderApiResult(data, guestId) {
   const result = data || {};
-
   if (result.status === 'UNAUTHORIZED') {
-    clearSessionToken();
-    showResult('工作階段已過期', '請重新輸入 PIN 後再試。', 'warn');
+    handleUnauthorized('請重新輸入 PIN 後再試。');
     addRecent(result.status, guestId, result.message || '請重新建立工作階段');
     return;
   }
-
-  const title = (result.status || 'UNKNOWN') + ' ' + (result.displayName || '');
+  const title = result.status === 'CHECKED_IN'
+    ? '報到成功'
+    : result.status === 'ALREADY_CHECKED_IN'
+      ? '已完成報到'
+      : (result.status || 'UNKNOWN') + ' ' + (result.displayName || '');
   const detail = [
+    result.displayName ? '姓名 ' + result.displayName : '',
     result.tableNo ? '桌號 ' + result.tableNo : '',
-    result.guestId ? '賓客 ' + result.guestId : '',
     result.message || ''
   ].filter(Boolean).join(' / ');
-
   const tone = result.status === 'CHECKED_IN'
     ? 'success'
     : result.status === 'ALREADY_CHECKED_IN'
       ? 'warn'
       : 'error';
-
   showResult(title.trim(), detail || guestId, tone);
   addRecent(result.status || 'UNKNOWN', guestId, detail || result.message || '');
+}
+
+function renderLookupResults(data) {
+  const result = data || {};
+  elements.lookupResults.replaceChildren();
+  if (result.status === 'UNAUTHORIZED') {
+    handleUnauthorized('請重新輸入 PIN 後再查找。');
+    elements.lookupStatus.textContent = '';
+    return;
+  }
+  if (result.status === 'EMPTY_LOOKUP') {
+    elements.lookupStatus.textContent = result.message || '請輸入姓名或稱呼。';
+    return;
+  }
+  const results = Array.isArray(result.results) ? result.results : [];
+  if (!results.length) {
+    elements.lookupStatus.textContent = result.message || '找不到符合的賓客。';
+    return;
+  }
+  elements.lookupStatus.textContent = result.hasMore
+    ? '找到前 ' + results.length + ' 筆，請輸入更完整的姓名。'
+    : '找到 ' + results.length + ' 筆，請確認姓名與關係。';
+  results.forEach(guest => {
+    const isCheckedIn = guest.checkInStatus === '已報到';
+    const attendanceStatus = guest.attendanceStatus || '出席狀態未填寫';
+    const isWarning = !isCheckedIn && attendanceStatus !== '會參加';
+    const card = document.createElement('article');
+    card.className = 'lookup-card'
+      + (isCheckedIn ? ' is-checked-in' : '')
+      + (isWarning ? ' is-warning' : '');
+    const tableText = guest.tableNo ? '桌號 ' + guest.tableNo : '桌號尚未分配';
+    const checkInText = isCheckedIn ? '已報到' : '尚未報到';
+    card.innerHTML = [
+      '<div class="lookup-card-title">' + escapeHtml(guest.displayName || '未命名賓客') + '</div>',
+      '<div class="lookup-card-meta">',
+      '<span>' + escapeHtml(guest.group || '關係未填寫') + '</span>',
+      '<span>' + escapeHtml(tableText) + ' / 預計 ' + escapeHtml(guest.expectedCount || 0) + ' 人</span>',
+      '<span>' + escapeHtml(attendanceStatus) + ' / ' + escapeHtml(checkInText) + '</span>',
+      '</div>'
+    ].join('');
+    const actions = document.createElement('div');
+    actions.className = 'lookup-actions';
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.disabled = isCheckedIn || !guest.guestId;
+    button.textContent = isCheckedIn
+      ? '已報到'
+      : guest.guestId
+        ? (isWarning ? '確認報到' : '報到')
+        : '缺少賓客 ID';
+    button.addEventListener('click', () => {
+      const confirmation = [
+        '確認是這位賓客嗎？',
+        '姓名：' + (guest.displayName || '未命名賓客'),
+        '關係：' + (guest.group || '未填寫'),
+        tableText,
+        '出席狀態：' + attendanceStatus
+      ].join('\\n');
+      if (window.confirm(confirmation)) {
+        enqueueCheckin(guest.guestId, { source: 'lookup' });
+      }
+    });
+    actions.append(button);
+    card.append(actions);
+    elements.lookupResults.append(card);
+  });
 }
 
 function extractGuestId(rawValue) {

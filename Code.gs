@@ -11,7 +11,10 @@ const GUEST_HEADERS = [
   '操作人員',
   '報到時間',
   '報到站台',
-  '備註'
+  '備註',
+  '出席確認',
+  '素食',
+  '喜餅'
 ];
 
 const SCAN_LOG_HEADERS = [
@@ -128,6 +131,14 @@ function doGet(e) {
       sessionToken: String(params.sessionToken || '').trim(),
       requestId: String(params.requestId || '').trim()
     };
+  } else if (params.action === 'lookup') {
+    payload = {
+      action: 'lookup',
+      query: String(params.query || '').trim(),
+      group: String(params.group || '').trim(),
+      sessionToken: String(params.sessionToken || '').trim(),
+      requestId: String(params.requestId || '').trim()
+    };
   } else {
     return jsonResponse_({
       ok: true,
@@ -231,28 +242,39 @@ function createGoogleSheetsGuestStore_(ss) {
   return {
     findById(guestId) {
       const found = findGuestById_(ss, guestId);
-      if (!found) return null;
-
-      const row = found.row;
-      return {
-        guestId: String(row[GUEST_COL['賓客ID']] || '').trim(),
-        displayName: String(row[GUEST_COL['顯示姓名']] || '').trim(),
-        tableNo: String(row[GUEST_COL['桌號']] || '').trim(),
-        expectedCount: Number(row[GUEST_COL['預計人數']] || 0),
-        actualCount: Number(row[GUEST_COL['實到人數']] || 0),
-        status: String(row[GUEST_COL['報到狀態']] || '').trim(),
-        checkedInAt: row[GUEST_COL['報到時間']] || null,
-        operator: String(row[GUEST_COL['操作人員']] || '').trim(),
-        station: String(row[GUEST_COL['報到站台']] || '').trim()
-      };
+      return found ? guestRecordFromRow_(found.row) : null;
     },
-
+    search(query, group) {
+      const sheet = getRequiredSheet_(ss, 'Guests');
+      const lastRow = sheet.getLastRow();
+      if (lastRow < 2) return [];
+      const normalizedQuery = normalizeLookupText_(query);
+      const normalizedGroup = normalizeLookupText_(group);
+      const rows = sheet
+        .getRange(2, 1, lastRow - 1, GUEST_HEADERS.length)
+        .getValues();
+      return rows
+        .map(guestRecordFromRow_)
+        .filter(guest => {
+          if (!guest.displayName) return false;
+          if (normalizedGroup && !normalizeLookupText_(guest.group).includes(normalizedGroup)) {
+            return false;
+          }
+          const name = normalizeLookupText_(guest.displayName);
+          const guestId = normalizeLookupText_(guest.guestId);
+          return name.includes(normalizedQuery) || guestId.includes(normalizedQuery);
+        })
+        .sort((left, right) => {
+          const rankDifference = lookupMatchRank_(left, normalizedQuery)
+            - lookupMatchRank_(right, normalizedQuery);
+          return rankDifference || left.displayName.localeCompare(right.displayName);
+        });
+    },
     markCheckedIn(guestId, update) {
       const found = findGuestById_(ss, guestId);
       if (!found) {
         throw apiError_('NOT_FOUND', '找不到要更新的賓客');
       }
-
       found.sheet
         .getRange(found.rowNumber, GUEST_COL['實到人數'] + 1, 1, 5)
         .setValues([[
@@ -264,6 +286,33 @@ function createGoogleSheetsGuestStore_(ss) {
         ]]);
     }
   };
+}
+
+function guestRecordFromRow_(row) {
+  return {
+    guestId: String(row[GUEST_COL['賓客ID']] || '').trim(),
+    displayName: String(row[GUEST_COL['顯示姓名']] || '').trim(),
+    group: String(row[GUEST_COL['分組']] || '').trim(),
+    side: String(row[GUEST_COL['新郎/新娘方']] || '').trim(),
+    tableNo: String(row[GUEST_COL['桌號']] || '').trim(),
+    expectedCount: Number(row[GUEST_COL['預計人數']] || 0),
+    actualCount: Number(row[GUEST_COL['實到人數']] || 0),
+    status: String(row[GUEST_COL['報到狀態']] || '').trim(),
+    checkedInAt: row[GUEST_COL['報到時間']] || null,
+    operator: String(row[GUEST_COL['操作人員']] || '').trim(),
+    station: String(row[GUEST_COL['報到站台']] || '').trim(),
+    attendanceStatus: String(row[GUEST_COL['出席確認']] || '').trim(),
+    vegetarian: String(row[GUEST_COL['素食']] || '').trim(),
+    weddingGiftCount: Number(row[GUEST_COL['喜餅']] || 0)
+  };
+}
+
+function lookupMatchRank_(guest, query) {
+  const name = normalizeLookupText_(guest.displayName);
+  if (name === query) return 0;
+  if (name.startsWith(query)) return 1;
+  if (normalizeLookupText_(guest.guestId) === query) return 1;
+  return 2;
 }
 
 function createGoogleSheetsScanLog_(ss) {
@@ -331,6 +380,8 @@ function parseApiPayload_(e) {
     pin: String(payload.pin || '').trim(),
     operator: String(payload.operator || '').trim(),
     station: String(payload.station || '').trim(),
+    query: String(payload.query || '').trim(),
+    group: String(payload.group || '').trim(),
     sessionToken: String(payload.sessionToken || '').trim(),
     requestId: String(payload.requestId || '').trim()
   };
@@ -346,6 +397,10 @@ function safeApiCall_(payload, now) {
 
     if (payload.action === 'checkin') {
       return handleApiCheckin_(payload, now);
+    }
+
+    if (payload.action === 'lookup') {
+      return handleApiLookup_(payload, now);
     }
 
     throw apiError_('BAD_REQUEST', '不支援的 API action');
@@ -382,6 +437,26 @@ function handleApiCheckin_(payload, now) {
     observedAt: now
   });
 
+  return Object.assign({}, result, {
+    processedAt: formatDate_(now),
+    requestId: payload.requestId || ''
+  });
+}
+
+function handleApiLookup_(payload, now) {
+  if (payload.action !== 'lookup') {
+    throw apiError_('BAD_REQUEST', '不支援的 API action');
+  }
+  verifySessionToken_(payload.sessionToken, now);
+  const ss = getSpreadsheet_();
+  const module = createGuestLookupModule_({
+    guestStore: createGoogleSheetsGuestStore_(ss),
+    maxResults: 20
+  });
+  const result = module.search({
+    query: payload.query,
+    group: payload.group
+  });
   return Object.assign({}, result, {
     processedAt: formatDate_(now),
     requestId: payload.requestId || ''
@@ -472,6 +547,9 @@ function shouldAppendScanLog_(status) {
   return ['true', 'yes', '1', 'y'].includes(String(value || '').trim().toLowerCase());
 }
 
+function normalizeLookupText_(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, '');
+}
 function extractGuestId_(rawScan) {
   const value = String(rawScan || '').trim();
   if (!value) return '';
@@ -515,6 +593,51 @@ function formatDate_(value) {
   const date = value instanceof Date ? value : new Date(value);
   if (isNaN(date.getTime())) return String(value);
   return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy/MM/dd HH:mm:ss');
+}
+
+function createGuestLookupModule_(dependencies) {
+  const guestStore = dependencies.guestStore;
+  const maxResults = Math.max(1, Number(dependencies.maxResults) || 20);
+  return {
+    search(request) {
+      const input = request || {};
+      const query = String(input.query || '').trim();
+      const group = String(input.group || '').trim();
+      if (!query) {
+        return {
+          ok: false,
+          status: 'EMPTY_LOOKUP',
+          query,
+          group,
+          results: [],
+          hasMore: false,
+          message: '請輸入姓名或稱呼'
+        };
+      }
+      const matches = guestStore.search(query, group);
+      const hasMore = matches.length > maxResults;
+      const results = matches.slice(0, maxResults).map(guest => ({
+        guestId: guest.guestId,
+        displayName: guest.displayName,
+        group: guest.group,
+        side: guest.side,
+        tableNo: guest.tableNo,
+        expectedCount: guest.expectedCount,
+        checkInStatus: guest.status,
+        checkedInAt: guest.checkedInAt,
+        attendanceStatus: guest.attendanceStatus
+      }));
+      return {
+        ok: true,
+        status: results.length ? 'LOOKUP_RESULTS' : 'NO_MATCHES',
+        query,
+        group,
+        results,
+        hasMore,
+        message: results.length ? '' : '找不到符合的賓客'
+      };
+    }
+  };
 }
 
 function createCheckInModule_(dependencies) {
