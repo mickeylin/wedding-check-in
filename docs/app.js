@@ -159,8 +159,8 @@ async function searchGuests() {
   if (!validateSettings()) return;
   const query = elements.lookupQuery.value.trim();
   const category = elements.lookupCategory.value.trim();
-  if (!query) {
-    elements.lookupStatus.textContent = '請輸入姓名或稱呼。';
+  if (!query && !category) {
+    elements.lookupStatus.textContent = '請輸入姓名或選擇關係分類。';
     elements.lookupResults.replaceChildren();
     return;
   }
@@ -331,7 +331,7 @@ function renderLookupResults(data) {
     return;
   }
   elements.lookupStatus.textContent = result.hasMore
-    ? '找到前 ' + results.length + ' 筆，請輸入更完整的姓名。'
+    ? '找到前 ' + results.length + ' 筆，請再縮小分類或輸入姓名。'
     : '找到 ' + results.length + ' 筆，請確認姓名與關係分類。';
   results.forEach(guest => {
     const isCheckedIn = guest.checkInStatus === '已報到';

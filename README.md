@@ -28,7 +28,7 @@ GitHub Pages 掃描頁
 
 - `Code.gs`：Apps Script 後端，包含 Sheet 初始化與 `doGet`/`doPost` API。
 - `docs/index.html`：GitHub Pages 掃描頁。
-- `docs/app.js`：相機掃描、PIN/session 設定、姓名查找、API 呼叫與結果顯示。
+- `docs/app.js`：相機掃描、PIN/session 設定、姓名／分類查找、API 呼叫與結果顯示。
 - `docs/styles.css`：掃描頁樣式。
 - `sample_guests.csv`：賓客資料範例。
 
@@ -75,7 +75,7 @@ GitHub Pages 掃描頁
 - `賓客ID`：不要從 CSV 自行編號，執行 `generateGuestIds` 產生。
 - `素食`、`喜餅`、`確認`：不匯入 `Guests`。
 
-手機查找使用「姓名＋關係分類」。選 `男方朋友` 或 `女方朋友` 時，結果會額外包含 `共同朋友`；其他分類採精確比對。這份名單沒有手機末四碼或推薦人，因此不需要其他查找欄位。
+手機查找使用「關係分類」，姓名／稱呼可選。選 `男方朋友` 或 `女方朋友` 時，結果會額外包含 `共同朋友`；其他分類採精確比對。這份名單沒有手機末四碼或推薦人，因此不需要其他查找欄位。
 
 最安全做法：先把 CSV 匯入另一個暫存分頁，再依上述欄位複製到 `Guests` 對應欄位；不要把 7 欄 CSV 整段貼到 `Guests` 的 A1，避免欄位錯位。
 
@@ -177,9 +177,9 @@ QR Code 只放 `賓客ID`，不要把 API URL、PIN 或桌號編進 QR。
 5. 按「儲存設定」。PIN 只會用來建立短期 session，不會被持久儲存。
 6. 按「開始掃描」並允許相機權限。
 7. 掃到 QR 後，頁面會顯示報到成功、重複報到或找不到賓客 ID。
-8. 如果沒有 QR，打開「沒有 QR？用姓名查找」，輸入賓客在名單上的姓名或稱呼，再選擇 CSV 的關係分類；選「男方朋友」或「女方朋友」會一併包含「共同朋友」，確認姓名、分類與桌號後按「報到」。
+8. 如果沒有 QR，打開「沒有 QR？用分類查找」，選擇 CSV 的關係分類即可列出賓客；也可輸入姓名或稱呼縮小結果。選「男方朋友」或「女方朋友」會一併包含「共同朋友」，確認分類與桌號後按「報到」。
 
-沒有 QR 時，工作人員可直接在同一頁的「沒有 QR？用姓名查找」輸入姓名／稱呼並選擇關係分類。選到正確結果後仍會呼叫同一個 check-in 流程，不會繞過 session、lock 或 `ScanLog`。
+沒有 QR 時，工作人員可直接在同一頁的「沒有 QR？用分類查找」選擇關係分類；姓名／稱呼可省略，也可以用來縮小結果。選到正確結果後仍會呼叫同一個 check-in 流程，不會繞過 session、lock 或 `ScanLog`。
 
 掃描頁送出報到 API 時不會暫停相機，可以連續掃下一位。第一次開始掃描或手動報到時，頁面會先以 PIN 換取綁定站台與操作人員的短期 session token；後續 check-in 只送 token，後端不信任前端每次請求附帶的 operator/station。為避免同一張 QR 留在鏡頭內造成重複送出，同一個賓客 ID 會有短暫冷卻，且同時最多保留 3 筆送出中的報到請求。
 
@@ -202,7 +202,7 @@ GitHub Pages 預設使用 JSONP，先建立 session，再送出 check-in：
 ```text
 GET WEB_APP_URL?action=session&pin=...&station=...&operator=...&callback=...
 GET WEB_APP_URL?action=checkin&guestId=賓客ID&sessionToken=...&requestId=...&callback=...
-GET WEB_APP_URL?action=lookup&query=姓名或稱呼&category=男方朋友&sessionToken=...&requestId=...&callback=...
+GET WEB_APP_URL?action=lookup&query=姓名或稱呼（可省略）&category=男方朋友&sessionToken=...&requestId=...&callback=...
 ```
 
 Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 CORS 的後端：
@@ -252,11 +252,11 @@ Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 COR
 7. 兩台手機同時掃不同賓客，都能成功寫回 `Guests`。
 8. PIN 錯誤時不會更新 Sheet。
 9. lock 忙碌時回傳 `BUSY` 且不寫入；斷網或 timeout 時前端不建立本地待同步佇列。
-10. 沒有 QR 時用姓名查找，確認姓名／新郎新娘方／桌號後仍能成功報到。
+10. 沒有 QR 時用分類查找，確認分類／桌號後仍能成功報到。
 
 ## 安全注意事項
 
 - `API_PIN` 是現場操作防線，不是高強度帳號系統。
-- session token 只短期有效，且只存於瀏覽器 sessionStorage；姓名查找也必須先取得有效 session；婚宴結束後仍建議停用 Web App 部署或更換 `API_PIN`。
+- session token 只短期有效，且只存於瀏覽器 sessionStorage；查找也必須先取得有效 session；婚宴結束後仍建議停用 Web App 部署或更換 `API_PIN`。
 - 不要把 PIN 寫死在 `docs/app.js` 或公開文件。
 - 婚宴結束後建議停用 Apps Script Web App 部署，或刪除 / 更換 `API_PIN`。

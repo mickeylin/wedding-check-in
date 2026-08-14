@@ -26,6 +26,7 @@ const SCAN_LOG_HEADERS = [
 const API_STATION_NAME = 'GitHubPages';
 const SESSION_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
 const SESSION_PROPERTY_PREFIX = 'CHECKIN_SESSION_';
+const LOOKUP_MAX_RESULTS = 100;
 const GUEST_COL = columnMap_(GUEST_HEADERS);
 
 /**
@@ -299,7 +300,9 @@ function createGoogleSheetsGuestStore_(ss) {
           }
           const name = normalizeLookupText_(guest.displayName);
           const guestId = normalizeLookupText_(guest.guestId);
-          return name.includes(normalizedQuery) || guestId.includes(normalizedQuery);
+          return !normalizedQuery
+            || name.includes(normalizedQuery)
+            || guestId.includes(normalizedQuery);
         })
         .sort((left, right) => {
           const rankDifference = lookupMatchRank_(left, normalizedQuery)
@@ -339,6 +342,7 @@ function guestRecordFromRow_(row) {
 }
 
 function lookupMatchRank_(guest, query) {
+  if (!query) return 2;
   const name = normalizeLookupText_(guest.displayName);
   if (name === query) return 0;
   if (name.startsWith(query)) return 1;
@@ -482,7 +486,7 @@ function handleApiLookup_(payload, now) {
   const ss = getSpreadsheet_();
   const module = createGuestLookupModule_({
     guestStore: createGoogleSheetsGuestStore_(ss),
-    maxResults: 20
+    maxResults: LOOKUP_MAX_RESULTS
   });
   const result = module.search({
     query: payload.query,
@@ -649,13 +653,13 @@ function formatDate_(value) {
 
 function createGuestLookupModule_(dependencies) {
   const guestStore = dependencies.guestStore;
-  const maxResults = Math.max(1, Number(dependencies.maxResults) || 20);
+  const maxResults = Math.max(1, Number(dependencies.maxResults) || LOOKUP_MAX_RESULTS);
   return {
     search(request) {
       const input = request || {};
       const query = String(input.query || '').trim();
       const category = String(input.category || input.side || '').trim();
-      if (!query) {
+      if (!query && !category) {
         return {
           ok: false,
           status: 'EMPTY_LOOKUP',
@@ -663,7 +667,7 @@ function createGuestLookupModule_(dependencies) {
           category,
           results: [],
           hasMore: false,
-          message: '請輸入姓名或稱呼'
+          message: '請輸入姓名或選擇關係分類'
         };
       }
       const matches = guestStore.search(query, category);

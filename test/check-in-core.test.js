@@ -228,7 +228,7 @@ test('Guests 寫入成功但 ScanLog 失敗時仍回傳 CHECKED_IN', () => {
   assert.equal(result.warnings[0], 'SCAN_LOG_FAILED');
   assert.equal(dependencies.guests.get('G001').status, '已報到');
 });
-test('姓名查找會回傳桌號與關係分類', () => {
+test('查找會回傳桌號與關係分類', () => {
   const { createGuestLookupModule_ } = loadCodeGs();
   const dependencies = createInMemoryDependencies();
   const lookup = createGuestLookupModule_({
@@ -253,14 +253,18 @@ test('朋友分類查找會包含共同朋友，其他分類維持精確比對',
   assert.deepEqual(Array.from(lookupCategoriesForFilter_('男方家人')), ['男方家人']);
   assert.deepEqual(Array.from(lookupCategoriesForFilter_('共同朋友')), ['共同朋友']);
 });
-test('姓名查找要求查詢字串且找不到時不回傳資料', () => {
+test('查找至少需要姓名或分類，且找不到時不回傳資料', () => {
   const { createGuestLookupModule_ } = loadCodeGs();
   const dependencies = createInMemoryDependencies();
   const lookup = createGuestLookupModule_({ guestStore: dependencies.guestStore });
-  const empty = lookup.search({ query: '' });
+  const empty = lookup.search({ query: '', category: '' });
+  const categoryOnly = lookup.search({ query: '', category: '男方朋友' });
   const missing = lookup.search({ query: '不存在' });
   assert.equal(empty.status, 'EMPTY_LOOKUP');
   assert.equal(empty.ok, false);
+  assert.equal(categoryOnly.status, 'LOOKUP_RESULTS');
+  assert.equal(categoryOnly.results.length, 1);
+  assert.equal(categoryOnly.results[0].guestId, 'G001');
   assert.equal(missing.status, 'NO_MATCHES');
   assert.equal(missing.ok, true);
   assert.deepEqual(missing.results, []);
