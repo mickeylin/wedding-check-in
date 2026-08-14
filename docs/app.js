@@ -1,12 +1,11 @@
 const STORAGE_KEY = 'wedding-check-in-settings';
 const SESSION_STORAGE_KEY = 'wedding-check-in-session-token';
 const DUPLICATE_SCAN_COOLDOWN_MS = 2500;
-const MAX_IN_FLIGHT_CHECKINS = 3;
 
 const elements = {
   apiUrl: document.querySelector('#apiUrl'),
   pin: document.querySelector('#pin'),
-  station: document.querySelector('#station'),
+
   operator: document.querySelector('#operator'),
   saveSettingsButton: document.querySelector('#saveSettingsButton'),
   startButton: document.querySelector('#startButton'),
@@ -20,15 +19,21 @@ const elements = {
   lookupResults: document.querySelector('#lookupResults'),
   resultBox: document.querySelector('#resultBox'),
   recentList: document.querySelector('#recentList'),
-  connectionStatus: document.querySelector('#connectionStatus')
+  connectionStatus: document.querySelector('#connectionStatus'),
+  checkinModal: document.querySelector('#checkinModal'),
+  checkinModalCard: document.querySelector('#checkinModalCard'),
+  checkinModalTitle: document.querySelector('#checkinModalTitle'),
+  checkinModalMessage: document.querySelector('#checkinModalMessage'),
+  nextGuestButton: document.querySelector('#nextGuestButton')
 };
 
 let scanner = null;
 let isScanning = false;
 let sessionPromise = null;
-let inFlightCheckins = 0;
-const pendingGuestIds = new Set();
+
 const recentGuestIdScanAt = new Map();
+const checkinGate = window.CheckinGate.create();
+let shouldResumeScannerAfterGate = false;
 
 loadSettings();
 updateConnectionStatus();
@@ -40,6 +45,7 @@ elements.saveSettingsButton.addEventListener('click', () => {
 
 elements.startButton.addEventListener('click', startScanner);
 elements.stopButton.addEventListener('click', stopScanner);
+elements.nextGuestButton.addEventListener('click', continueToNextGuest);
 
 elements.manualForm.addEventListener('submit', event => {
   event.preventDefault();
@@ -58,7 +64,7 @@ elements.lookupForm.addEventListener('submit', event => {
 });
 
 async function startScanner() {
-  if (isScanning) return;
+  if (checkinGate.state() !== 'READY' || isScanning) return;
   if (!validateSettings()) return;
   if (!(await ensureSession())) return;
 
@@ -98,22 +104,28 @@ function onQrDecoded(decodedText) {
 }
 
 async function enqueueCheckin(guestId, options = {}) {
-  if (!validateSettings()) return;
-  if (!(await ensureSession())) return;
-
-  const now = Date.now();
-  const lastScanAt = recentGuestIdScanAt.get(guestId) || 0;
   const isManual = options.source !== 'scanner';
-
-  if (pendingGuestIds.has(guestId)) {
-    if (isManual) showResult('報到處理中', guestId + ' 已送出，請等待回應。', 'warn');
+  if (!checkinGate.begin()) {
+    if (isManual) {
+      showResult('請先完成目前報到', '按「下一位」後再操作。', 'warn');
+    }
     return;
   }
 
-  if (!isManual && now - lastScanAt < DUPLICATE_SCAN_COOLDOWN_MS) return;
+  if (!validateSettings()) {
+    checkinGate.reset();
+    return;
+  }
+  if (!(await ensureSession())) {
+    checkinGate.reset();
+    return;
+  }
 
-  if (inFlightCheckins >= MAX_IN_FLIGHT_CHECKINS) {
-    showResult('處理佇列忙碌', '請稍等前一批報到完成。', 'warn');
+  const now = Date.now();
+  const lastScanAt = recentGuestIdScanAt.get(guestId) || 0;
+
+  if (!isManual && now - lastScanAt < DUPLICATE_SCAN_COOLDOWN_MS) {
+    checkinGate.reset();
     return;
   }
 
@@ -124,24 +136,23 @@ async function enqueueCheckin(guestId, options = {}) {
 async function submitCheckin(guestId) {
   const settings = getSettings();
   const requestId = createRequestId();
-  pendingGuestIds.add(guestId);
-  inFlightCheckins += 1;
-  showResult('已送出報到', guestId + ' 已送出，鏡頭可繼續掃描。', 'neutral');
+  shouldResumeScannerAfterGate = isScanning;
 
   try {
+    if (shouldResumeScannerAfterGate) {
+      await stopScanner();
+    }
+    showResult('已送出報到', guestId + ' 已送出，請等待結果。', 'neutral');
+
     const data = await jsonpCheckin(settings, guestId, requestId);
     renderApiResult(data, guestId);
   } catch (err) {
-    showResult(
-      'API 呼叫失敗',
-      messageOf(err) + '。請確認 Apps Script Web App URL 與工作階段設定。',
-      'error'
-    );
+    const message = messageOf(err) + '。請確認 Apps Script Web App URL 與工作階段設定。';
+    showResult('API 呼叫失敗', message, 'error');
     addRecent('ERROR', guestId, messageOf(err));
+    openCheckinGate('API 呼叫失敗', message, 'error');
   } finally {
-    pendingGuestIds.delete(guestId);
     recentGuestIdScanAt.set(guestId, Date.now());
-    inFlightCheckins = Math.max(0, inFlightCheckins - 1);
     pruneRecentGuestIds(Date.now());
   }
 }
@@ -229,7 +240,7 @@ function jsonpSession(settings) {
   return jsonpRequest(settings, {
     action: 'session',
     pin: settings.pin,
-    station: settings.station,
+
     operator: settings.operator
   });
 }
@@ -291,6 +302,8 @@ function renderApiResult(data, guestId) {
   const result = data || {};
   if (result.status === 'UNAUTHORIZED') {
     handleUnauthorized('請重新輸入 PIN 後再試。');
+    checkinGate.reset();
+    shouldResumeScannerAfterGate = false;
     addRecent(result.status, guestId, result.message || '請重新建立工作階段');
     return;
   }
@@ -311,6 +324,34 @@ function renderApiResult(data, guestId) {
       : 'error';
   showResult(title.trim(), detail || guestId, tone);
   addRecent(result.status || 'UNKNOWN', guestId, detail || result.message || '');
+  openCheckinGate(title.trim(), detail || guestId, tone);
+}
+
+function openCheckinGate(title, message, tone) {
+  checkinGate.complete();
+  elements.checkinModalCard.className = 'checkin-modal-card ' + (tone || 'neutral');
+  elements.checkinModalTitle.textContent = title;
+  elements.checkinModalMessage.textContent = message || '';
+  elements.checkinModal.hidden = false;
+  elements.nextGuestButton.focus();
+}
+
+async function continueToNextGuest() {
+  const resumeScanner = shouldResumeScannerAfterGate;
+  shouldResumeScannerAfterGate = false;
+  elements.nextGuestButton.disabled = true;
+  elements.checkinModal.hidden = true;
+  checkinGate.reset();
+
+  try {
+    if (resumeScanner) {
+      await startScanner();
+    } else {
+      elements.manualGuestId.focus();
+    }
+  } finally {
+    elements.nextGuestButton.disabled = false;
+  }
 }
 
 function renderLookupResults(data) {
@@ -322,7 +363,7 @@ function renderLookupResults(data) {
     return;
   }
   if (result.status === 'EMPTY_LOOKUP') {
-    elements.lookupStatus.textContent = result.message || '請輸入姓名或稱呼。';
+    elements.lookupStatus.textContent = result.message || '請輸入姓名或選擇關係分類。';
     return;
   }
   const results = Array.isArray(result.results) ? result.results : [];
@@ -406,7 +447,7 @@ function getSettings() {
   return {
     apiUrl: elements.apiUrl.value.trim(),
     pin: elements.pin.value.trim(),
-    station: elements.station.value.trim() || 'GitHubPages',
+
     operator: elements.operator.value.trim() || 'unknown',
     sessionToken: readSessionToken()
   };
@@ -416,7 +457,7 @@ function saveSettings() {
   const settings = getSettings();
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
     apiUrl: settings.apiUrl,
-    station: settings.station,
+
     operator: settings.operator
   }));
   clearSessionToken();
@@ -432,12 +473,12 @@ function loadSettings() {
     const settings = JSON.parse(raw);
     elements.apiUrl.value = settings.apiUrl || '';
     elements.pin.value = '';
-    elements.station.value = settings.station || 'GitHubPages';
+
     elements.operator.value = settings.operator || '';
 
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
       apiUrl: elements.apiUrl.value,
-      station: elements.station.value,
+
       operator: elements.operator.value
     }));
   } catch (err) {

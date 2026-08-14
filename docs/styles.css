@@ -280,6 +280,60 @@ button:disabled {
   color: var(--muted);
 }
 
+.checkin-modal[hidden] {
+  display: none;
+}
+
+.checkin-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(32 33 36 / 58%);
+}
+
+.checkin-modal-card {
+  width: min(100%, 420px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 24px;
+  background: var(--panel);
+  box-shadow: 0 16px 40px rgb(0 0 0 / 22%);
+}
+
+.checkin-modal-card h2 {
+  margin-bottom: 10px;
+}
+
+.checkin-modal-card p {
+  margin-bottom: 0;
+  white-space: pre-line;
+}
+
+.checkin-modal-card.success {
+  background: var(--success);
+  border-color: #b5d8bf;
+  color: var(--success-ink);
+}
+
+.checkin-modal-card.warn {
+  background: var(--warn);
+  border-color: #e4ca76;
+  color: var(--warn-ink);
+}
+
+.checkin-modal-card.error {
+  background: var(--error);
+  border-color: #e8adad;
+  color: var(--error-ink);
+}
+
+.checkin-modal-card button {
+  min-height: 52px;
+  margin-top: 20px;
+}
 @media (max-width: 980px) {
   .layout {
     grid-template-columns: 1fr;

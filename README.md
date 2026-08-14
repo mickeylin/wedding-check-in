@@ -173,7 +173,7 @@ QR Code 只放 `賓客ID`，不要把 API URL、PIN 或桌號編進 QR。
 1. 工作人員用手機開 GitHub Pages 掃描頁。
 2. 貼上 Apps Script API URL。
 3. 輸入工作人員 PIN。
-4. 輸入站台與操作人員名稱。
+4. 輸入操作人員名稱。
 5. 按「儲存設定」。PIN 只會用來建立短期 session，不會被持久儲存。
 6. 按「開始掃描」並允許相機權限。
 7. 掃到 QR 後，頁面會顯示報到成功、重複報到或找不到賓客 ID。
@@ -181,7 +181,7 @@ QR Code 只放 `賓客ID`，不要把 API URL、PIN 或桌號編進 QR。
 
 沒有 QR 時，工作人員可直接在同一頁的「沒有 QR？用分類查找」選擇關係分類；姓名／稱呼可省略，也可以用來縮小結果。選到正確結果後仍會呼叫同一個 check-in 流程，不會繞過 session、lock 或 `ScanLog`。
 
-掃描頁送出報到 API 時不會暫停相機，可以連續掃下一位。第一次開始掃描或手動報到時，頁面會先以 PIN 換取綁定站台與操作人員的短期 session token；後續 check-in 只送 token，後端不信任前端每次請求附帶的 operator/station。為避免同一張 QR 留在鏡頭內造成重複送出，同一個賓客 ID 會有短暫冷卻，且同時最多保留 3 筆送出中的報到請求。
+每次掃描或手動報到完成後，頁面會顯示結果 modal 並暫停下一次報到；工作人員按「下一位」後，才會恢復掃描或允許下一次手動報到。第一次開始掃描或手動報到時，頁面會先以 PIN 換取綁定操作人員的短期 session token；後續 check-in 只送 token，後端不信任前端每次請求附帶的 operator。為避免同一張 QR 留在鏡頭內造成重複送出，同一個賓客 ID 仍有短暫冷卻。
 
 掃描成功時，Apps Script 會更新 `Guests`：
 
@@ -189,7 +189,7 @@ QR Code 只放 `賓客ID`，不要把 API URL、PIN 或桌號編進 QR。
 - `實到人數` 填既有實到人數、預計人數或 1
 - `操作人員` 填掃描頁輸入的操作人員
 - `報到時間` 填當下時間
-- 站台資訊保留在 `ScanLog`，不再寫入 `Guests`
+- 新版前端不再要求或傳送站台；ScanLog 的站台欄位保留相容性。
 
 預設只有重複報到、找不到賓客 ID、錯誤等狀態會追加到 `ScanLog`。若 `LOG_SUCCESS_CHECKINS=true`，成功報到也會寫入 `ScanLog`。
 
@@ -200,7 +200,7 @@ QR Code 只放 `賓客ID`，不要把 API URL、PIN 或桌號編進 QR。
 GitHub Pages 預設使用 JSONP，先建立 session，再送出 check-in：
 
 ```text
-GET WEB_APP_URL?action=session&pin=...&station=...&operator=...&callback=...
+GET WEB_APP_URL?action=session&pin=...&operator=...&callback=...
 GET WEB_APP_URL?action=checkin&guestId=賓客ID&sessionToken=...&requestId=...&callback=...
 GET WEB_APP_URL?action=lookup&query=姓名或稱呼（可省略）&category=男方朋友&sessionToken=...&requestId=...&callback=...
 ```
@@ -211,7 +211,6 @@ Apps Script 也保留 `POST` JSON API，方便測試或未來改成可處理 COR
 {
   "action": "session",
   "pin": "工作人員PIN",
-  "station": "入口A",
   "operator": "小美"
 }
 ```

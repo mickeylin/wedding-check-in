@@ -23,19 +23,10 @@
       <label for="apiUrl">Apps Script API URL</label>
       <input id="apiUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/.../exec">
 
-      <div class="field-row">
-        <div>
-          <label for="pin">工作人員 PIN</label>
-          <input id="pin" type="password" inputmode="numeric" autocomplete="off">
-        </div>
-        <div>
-          <label for="station">站台</label>
-          <input id="station" type="text" value="GitHubPages">
-        </div>
-      </div>
-
+      <label for="pin">工作人員 PIN</label>
+      <input id="pin" type="password" inputmode="numeric" autocomplete="off">
       <label for="operator">操作人員</label>
-      <input id="operator" type="text" placeholder="例如：入口A 小美">
+      <input id="operator" type="text" placeholder="例如：小美">
 
       <button id="saveSettingsButton" class="secondary-button" type="button">儲存設定</button>
     </section>
@@ -104,6 +95,22 @@
     </section>
   </main>
 
+  <div
+    id="checkinModal"
+    class="checkin-modal"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="checkinModalTitle"
+    hidden
+  >
+    <div id="checkinModalCard" class="checkin-modal-card neutral">
+      <h2 id="checkinModalTitle">報到結果</h2>
+      <p id="checkinModalMessage"></p>
+      <button id="nextGuestButton" type="button">下一位</button>
+    </div>
+  </div>
+
+  <script src="./checkin-gate.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
