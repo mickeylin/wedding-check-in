@@ -147,9 +147,8 @@ async function loadGuest(guestId) {
   shouldResumeScannerAfterGate = isScanning;
 
   try {
-    if (shouldResumeScannerAfterGate) {
-      await stopScanner();
-    }
+    // The gate suppresses additional decodes while this guest is open.
+    // Keep the camera stream alive instead of waiting for stop/start per guest.
     selectedGuest = null;
     updateGiftButtons();
     showResult('查詢中', guestId + '：正在查詢桌號與紅包狀態。', 'neutral');
@@ -265,6 +264,7 @@ function jsonpGuest(settings, guestId, requestId) {
 }
 
 function jsonpRequest(settings, params) {
+  const started = Date.now();
   return new Promise((resolve, reject) => {
     const callbackName = 'weddingCheckin_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
     const script = document.createElement('script');
@@ -274,6 +274,9 @@ function jsonpRequest(settings, params) {
     }, 12000);
 
     window[callbackName] = data => {
+      // Timing only: no PIN, token, guest identity or amounts in diagnostics.
+      window.lastGiftTiming = { action: params.action, totalMs: Date.now() - started,
+        serverMs: data && data.serverMs, lockWaitMs: data && data.lockWaitMs };
       cleanup();
       resolve(data);
     };
@@ -346,6 +349,9 @@ async function mutateGift(action) {
   const guest = selectedGuest;
   giftBusy = true;
   updateGiftButtons();
+  elements.checkinModalMessage.textContent = action === 'receive'
+    ? '正在登記收到紅包，請稍候確認結果…'
+    : '正在撤銷收件，請稍候確認結果…';
   try {
     const data = await jsonpRequest(getSettings(), { action, guestId: guest.guestId,
       receiptId: guest.receiptId, sessionToken: readSessionToken(), requestId: createRequestId() });

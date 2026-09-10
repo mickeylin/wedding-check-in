@@ -58,9 +58,10 @@ function giftStatus_(records) {
 function createGiftModule_(deps) {
   return {
     execute(input) {
-      return deps.lock.runExclusive(() => {
-        const guest = deps.guests.findById(input.guestId);
-        if (!guest) throw apiError_('NOT_FOUND', '找不到賓客編號，請用姓名查找或人工處理');
+      // Guest identity/table data does not participate in receipt serialization.
+      const guest = deps.guests.findById(input.guestId);
+      if (!guest) throw apiError_('NOT_FOUND', '找不到賓客編號，請用姓名查找或人工處理');
+      const execute = () => {
         const records = deps.store.list();
         const forGuest = () => records.filter(record => record.guestId === input.guestId);
         const response = (status, message) => Object.assign({ ok: true, status, message,
@@ -98,17 +99,24 @@ function createGiftModule_(deps) {
           return response('CANCELLED', '已撤銷收件，原始收件紀錄仍保留');
         }
         throw apiError_('BAD_REQUEST', '不支援的操作');
-      });
+      };
+      // Read-only snapshots may be momentarily stale; mutations always re-read under lock.
+      return input.action === 'guest' ? execute() : deps.lock.runExclusive(execute);
     }
   };
 }
 
 function createGiftStore_(ss) {
-  const sheet = requireGiftSchema_(ss, 'Gifts', GIFT_HEADERS);
+  const sheet = getRequiredSheet_(ss, 'Gifts');
   return {
     list() {
-      return sheet.getLastRow() < 2 ? [] : sheet.getRange(2, 1, sheet.getLastRow() - 1, GIFT_HEADERS.length)
-        .getValues().map((row, i) => giftRecord_(row, i + 2)).filter(record => record.guestId || record.receiptId);
+      // One value read includes headers and records; no schema or state cache.
+      const values = sheet.getDataRange().getValues();
+      if (GIFT_HEADERS.some((header, i) => !values[0] || values[0][i] !== header)) {
+        throw apiError_('CONFIG_ERROR', 'Gifts 欄位順序不符，請勿直接搬移欄位');
+      }
+      return values.slice(1).map((row, i) => giftRecord_(row, i + 2))
+        .filter(record => record.guestId || record.receiptId);
     },
     receive(record) {
       // The row itself durably contains the receive event, even if an audit append fails.
@@ -133,18 +141,31 @@ function sheetText_(value) {
 }
 
 function handleGiftApi_(payload, now) {
+  const started = Date.now();
+  let lockWaitMs = 0;
   const session = verifySessionToken_(payload.sessionToken, now);
   const ss = getSpreadsheet_();
   const lock = { runExclusive(callback) {
+    const waiting = Date.now();
     return createScriptLock_(5000).runExclusive(() => {
+      lockWaitMs = Date.now() - waiting;
       try { return callback(); } finally { SpreadsheetApp.flush(); }
     });
   } };
-  const module = createGiftModule_({ lock, guests: createGoogleSheetsGuestStore_(ss),
+  const module = createGiftModule_({ lock, guests: { findById(guestId) {
+    const values = getRequiredSheet_(ss, 'Guests').getDataRange().getValues();
+    if (GUEST_HEADERS.some((header, i) => !values[0] || values[0][i] !== header)) {
+      throw apiError_('CONFIG_ERROR', 'Guests 欄位順序不符，請先執行 setupSheet');
+    }
+    const rows = values.slice(1).filter(row => String(row[0] || '').trim() === guestId);
+    if (rows.length > 1) throw apiError_('CONFIG_ERROR', '賓客編號重複，請先整理名單');
+    return rows.length ? guestRecordFromRow_(rows[0]) : null;
+  } },
     store: createGiftStore_(ss), clock: () => now, uuid: () => Utilities.getUuid() });
-  return module.execute(Object.assign({}, payload, {
+  const result = module.execute(Object.assign({}, payload, {
     guestId: extractGuestId_(payload.guestId), operator: session.operator
   }));
+  return Object.assign(result, { serverMs: Date.now() - started, lockWaitMs });
 }
 
 function installGiftEditTrigger() {

@@ -7,7 +7,7 @@ const vm = require('node:vm');
 function load(overrides = {}) {
   const source = ['Code.gs', 'GiftRegister.gs'].map(file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8')).join('\n');
   const context = { Utilities: { formatDate: date => date.toISOString() }, Session: { getScriptTimeZone: () => 'Asia/Taipei' }, ...overrides };
-  vm.runInNewContext(source + '\nthis.api = { createGiftModule_, safeApiCall_, giftStatus_, auditGiftEdit, ensureGuestSheet_, generateGuestIds, GIFT_HEADERS, GUEST_HEADERS };', context);
+  vm.runInNewContext(source + '\nthis.api = { handleGiftApi_, createGiftModule_, safeApiCall_, giftStatus_, auditGiftEdit, ensureGuestSheet_, generateGuestIds, GIFT_HEADERS, GUEST_HEADERS };', context);
   return context.api;
 }
 
@@ -37,6 +37,13 @@ test('查桌號不建立收件、不修改到場或人數', () => {
   assert.equal(f.records.length, 0);
   assert.equal(f.guests.get('G001').actualCount, 0);
   assert.equal(f.guests.get('G001').status, '');
+});
+
+test('唯讀查詢不排入寫入鎖，收件仍需取得鎖', () => {
+  const f = fixture();
+  f.deps.lock.runExclusive = () => { throw Object.assign(new Error('write lock busy'), { code: 'BUSY' }); };
+  assert.equal(f.call('guest').status, 'GUEST_FOUND');
+  assert.throws(() => f.call('receive'), error => error.code === 'BUSY');
 });
 
 test('明確收件才建立待清點，金額留白且保留收件人員', () => {
@@ -157,4 +164,45 @@ test('賓客 schema 補欄、調整順序時保留自訂資料；重跑不變', 
   const previous = JSON.stringify(sheet.data);
   api.ensureGuestSheet_(ss);
   assert.equal(JSON.stringify(sheet.data), previous);
+});
+
+test('正式 API adapter 每次只讀取兩表各一次；查詢零鎖零 flush，收件仍鎖內重讀', () => {
+  const headers = load();
+  const guests = sheetDouble('Guests', [Array.from(headers.GUEST_HEADERS), ['g001', 'Tutu', '男方朋友', '5', 2, '', '', '', '', '']]);
+  const gifts = sheetDouble('Gifts', [Array.from(headers.GIFT_HEADERS)]);
+  let reads = 0;
+  let locks = 0;
+  let flushes = 0;
+  for (const sheet of [guests, gifts]) {
+    const getRange = sheet.getRange;
+    sheet.getRange = (...args) => {
+      const range = getRange(...args);
+      const getValues = range.getValues;
+      range.getValues = () => { reads++; return getValues(); };
+      return range;
+    };
+  }
+  const now = new Date();
+  const api = load({
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => JSON.stringify({ operator: '測試人員', expiresAt: now.getTime() + 60000 }) }) },
+    Utilities: { getUuid: () => 'receipt', formatDate: date => date.toISOString() },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: name => name === 'Guests' ? guests : gifts }), flush: () => { flushes++; } },
+    LockService: { getScriptLock: () => ({ tryLock: () => { locks++; return true; }, releaseLock() {} }) }
+  });
+  const call = action => api.handleGiftApi_({ action, guestId: 'g001', sessionToken: 'test-token', requestId: 'test-request' }, now);
+  const result = call('guest');
+  assert.equal(result.tableNo, '5');
+  assert.equal(reads, 2);
+  assert.equal(locks, 0);
+  assert.equal(flushes, 0);
+  assert.equal(result.lockWaitMs, 0);
+  assert.ok(result.serverMs >= 0);
+  reads = 0;
+  assert.equal(call('receive').status, 'RECEIVED');
+  assert.equal(reads, 2);
+  assert.equal(locks, 1);
+  assert.equal(flushes, 1);
+  gifts.data[1][4] = '已清點';
+  gifts.data[1][5] = 3600;
+  assert.equal(call('guest').giftState, '已清點', '不快取過時收件狀態');
 });

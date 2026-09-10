@@ -17,7 +17,7 @@ function loadUi() {
     localStorage: { getItem() {}, setItem() {} }, confirm: () => true, crypto: { randomUUID: () => 'request' } };
   const context = { window, document: { querySelector: selector => { if (!nodes.has(selector)) nodes.set(selector, node()); return nodes.get(selector); }, createElement: node }, Date, Map, URL };
   const source = ['checkin-gate.js', 'app.js'].map(file => fs.readFileSync(path.join(__dirname, '..', 'docs', file), 'utf8')).join('\n');
-  vm.runInNewContext(source + '\nthis.ui = { query: queryGuest, mutate: mutateGift, next: continueToNextGuest, render: renderGiftResult };', context);
+  vm.runInNewContext(source + '\nthis.ui = { start: startScanner, stop: stopScanner, query: queryGuest, mutate: mutateGift, next: continueToNextGuest, render: renderGiftResult };', context);
   nodes.get('#apiUrl').value = 'https://example.test/exec';
   nodes.get('#operator').value = '工作人員';
   const requests = [];
@@ -36,6 +36,23 @@ test('QR 查詢只送 guest；按下一位不新增紅包', async () => {
   await f.ui.next();
   assert.equal(f.requests.length, 1);
   assert.equal(f.nodes.get('#receiveButton').hidden, true);
+});
+
+test('掃描查詢不等待相機 stop，下一位重用串流且手動停止仍有效', async () => {
+  const f = loadUi();
+  let starts = 0;
+  let stops = 0;
+  f.context.Html5Qrcode = class {
+    async start() { starts++; }
+    async stop() { stops++; }
+  };
+  await f.ui.start();
+  await f.ui.query('G001', { source: 'scanner' });
+  assert.equal(stops, 0, '不應在 API 查詢前關閉相機');
+  await f.ui.next();
+  assert.equal(starts, 1);
+  await f.ui.stop();
+  assert.equal(stops, 1);
 });
 
 test('收件提交中擋連點與下一位；成功後才顯示撤銷', async () => {
