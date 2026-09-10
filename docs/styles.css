@@ -334,6 +334,16 @@ button:disabled {
   min-height: 52px;
   margin-top: 20px;
 }
+
+.timing-details {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.timing-details summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
 @media (max-width: 980px) {
   .layout {
     grid-template-columns: 1fr;

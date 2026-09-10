@@ -28,6 +28,7 @@ const elements = {
 };
 elements.receiveButton = document.querySelector('#receiveButton');
 elements.cancelReceiptButton = document.querySelector('#cancelReceiptButton');
+elements.timingStatus = document.querySelector('#timingStatus');
 let selectedGuest = null;
 let giftBusy = false;
 
@@ -112,6 +113,7 @@ function onQrDecoded(decodedText) {
 }
 
 async function queryGuest(guestId, options = {}) {
+  const operationStarted = Date.now();
   const isManual = options.source !== 'scanner';
   if (!checkinGate.begin()) {
     if (isManual) {
@@ -124,10 +126,13 @@ async function queryGuest(guestId, options = {}) {
     checkinGate.reset();
     return;
   }
+  const needsSession = !readSessionToken();
+  const sessionStarted = Date.now();
   if (!(await ensureSession())) {
     checkinGate.reset();
     return;
   }
+  const sessionMs = needsSession ? Date.now() - sessionStarted : 0;
 
   const now = Date.now();
   const lastScanAt = recentGuestIdScanAt.get(guestId) || 0;
@@ -139,9 +144,9 @@ async function queryGuest(guestId, options = {}) {
 
   recentGuestIdScanAt.set(guestId, now);
   pruneRecentGuestIds(now);
-  await loadGuest(guestId);
+  await loadGuest(guestId, operationStarted, sessionMs);
 }
-async function loadGuest(guestId) {
+async function loadGuest(guestId, operationStarted = Date.now(), sessionMs = 0) {
   const settings = getSettings();
   const requestId = createRequestId();
   shouldResumeScannerAfterGate = isScanning;
@@ -154,8 +159,10 @@ async function loadGuest(guestId) {
     showResult('查詢中', guestId + '：正在查詢桌號與紅包狀態。', 'neutral');
 
     const data = await jsonpGuest(settings, guestId, requestId);
+    recordGiftTiming('查詢', operationStarted, data, sessionMs);
     renderGiftResult(data);
   } catch (err) {
+    recordGiftTiming('查詢失敗', operationStarted, null, sessionMs);
     const message = messageOf(err) + '。請確認 Apps Script Web App URL 與工作階段設定。';
     showResult('API 呼叫失敗', message, 'error');
     addRecent('ERROR', guestId, messageOf(err));
@@ -347,6 +354,7 @@ function renderGiftResult(data) {
 async function mutateGift(action) {
   if (giftBusy || !selectedGuest) return;
   const guest = selectedGuest;
+  const operationStarted = Date.now();
   giftBusy = true;
   updateGiftButtons();
   elements.checkinModalMessage.textContent = action === 'receive'
@@ -355,15 +363,33 @@ async function mutateGift(action) {
   try {
     const data = await jsonpRequest(getSettings(), { action, guestId: guest.guestId,
       receiptId: guest.receiptId, sessionToken: readSessionToken(), requestId: createRequestId() });
+    recordGiftTiming(action === 'receive' ? '收件' : '撤銷', operationStarted, data);
     renderGiftResult(data);
     if (data && data.ok) addRecent(data.status, guest.guestId, guest.displayName + '：' + data.message);
   } catch (err) {
+    recordGiftTiming('操作失敗', operationStarted, null);
     selectedGuest = null;
     openCheckinGate('收件狀態待確認', messageOf(err) + '。可能已寫入；請按下一位後重新查詢，核對狀態再操作。斷網時使用紙本備援。', 'error');
   } finally {
     giftBusy = false;
     updateGiftButtons();
   }
+}
+
+function recordGiftTiming(label, started, data, sessionMs = 0) {
+  if (!elements.timingStatus) return;
+  const totalMs = Date.now() - started;
+  const seconds = ms => (ms / 1000).toFixed(2) + ' 秒';
+  const lines = [label + '總等待：' + seconds(totalMs)];
+  if (sessionMs > 0) lines.push('其中登入：' + seconds(sessionMs));
+  if (data && typeof data.serverMs === 'number') {
+    lines.push('後端處理：' + seconds(data.serverMs));
+    lines.push('其中等鎖：' + seconds(data.lockWaitMs || 0));
+    lines.push('其餘往返／平台／頁面：' + seconds(Math.max(0, totalMs - sessionMs - data.serverMs)));
+  } else {
+    lines.push('後端耗時未提供（舊部署或請求失敗）');
+  }
+  elements.timingStatus.textContent = lines.join('\n');
 }
 
 async function continueToNextGuest() {

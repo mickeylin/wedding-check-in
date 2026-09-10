@@ -90,3 +90,16 @@ test('撤銷帶入收件ID；後端已清點時不再允許操作', async () => 
   assert.equal(f.requests[0].receiptId, 'original');
   assert.equal(f.nodes.get('#cancelReceiptButton').hidden, true);
 });
+
+test('手機測速顯示查詢總時間與後端時間，不暴露賓客或 token', async () => {
+  const f = loadUi();
+  let clock = 10000;
+  f.context.Date = class extends Date { static now() { return clock; } };
+  f.context.jsonpRequest = async () => { clock += 4853; return { ...f.guest, serverMs: 784, lockWaitMs: 0 }; };
+  await f.ui.query('G001');
+  const text = f.nodes.get('#timingStatus')?.textContent || '';
+  assert.match(text, /4\.85/);
+  assert.match(text, /0\.78/);
+  assert.match(text, /4\.07/);
+  assert.doesNotMatch(text, /G001|測試賓客|valid/);
+});
