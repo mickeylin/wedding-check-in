@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>婚禮 QR 報到</title>
+  <title>婚禮禮金簿</title>
   <link rel="stylesheet" href="./styles.css">
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
   <header class="topbar">
     <div>
-      <h1>婚禮 QR 報到</h1>
-      <p>GitHub Pages 掃描頁 + Apps Script API</p>
+      <h1>婚禮禮金簿</h1>
+      <p>查桌號・收到紅包後再登記</p>
     </div>
     <div id="connectionStatus" class="status-pill">未設定</div>
   </header>
@@ -46,7 +46,7 @@
         <label for="manualGuestId">手動輸入賓客 ID</label>
         <div class="manual-row">
           <input id="manualGuestId" type="text" autocomplete="off">
-          <button type="submit">送出</button>
+          <button type="submit">查詢</button>
         </div>
       </form>
     </section>
@@ -87,7 +87,7 @@
       <h2 id="resultTitle">結果</h2>
       <div id="resultBox" class="result-box neutral" aria-live="polite">
         <strong>等待掃描</strong>
-        <span>掃到賓客 ID QR Code 後會顯示報到結果。</span>
+        <span>掃描只查詢；按「收到紅包」才登記收件。</span>
       </div>
 
       <h3>最近紀錄</h3>
@@ -104,8 +104,10 @@
     hidden
   >
     <div id="checkinModalCard" class="checkin-modal-card neutral">
-      <h2 id="checkinModalTitle">報到結果</h2>
+      <h2 id="checkinModalTitle">賓客資訊</h2>
       <p id="checkinModalMessage"></p>
+      <button id="receiveButton" type="button" hidden>收到紅包</button>
+      <button id="cancelReceiptButton" class="secondary-button" type="button" hidden>撤銷誤收件</button>
       <button id="nextGuestButton" type="button">下一位</button>
     </div>
   </div>

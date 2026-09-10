@@ -46,9 +46,9 @@ function setupSheet() {
   scanLogSheet.getRange('A:A').setNumberFormat('yyyy/mm/dd hh:mm:ss');
   scanLogSheet.autoResizeColumns(1, SCAN_LOG_HEADERS.length);
 
-  setupDashboard_(ss);
+  setupGiftRegister_(ss);
 
-  return 'GitHub Pages 掃描報到工作表初始化完成';
+  return '數位禮金簿初始化完成；請另執行 installGiftEditTrigger';
 }
 
 function setupDashboard_(ss) {
@@ -78,6 +78,8 @@ function generateGuestIds() {
   if (values.length < 2) return '目前沒有賓客資料';
 
   const map = headerMap_(values[0], GUEST_HEADERS);
+  const usedIds = new Set(values.slice(1).map(row => String(row[map['賓客ID']] || '').trim()).filter(Boolean));
+  let nextId = 1;
   let changed = 0;
 
   for (let i = 1; i < values.length; i++) {
@@ -86,7 +88,9 @@ function generateGuestIds() {
     if (!name) continue;
 
     if (!String(row[map['賓客ID']] || '').trim()) {
-      row[map['賓客ID']] = 'G' + String(i).padStart(3, '0');
+      while (usedIds.has('G' + String(nextId).padStart(3, '0'))) nextId++;
+      row[map['賓客ID']] = 'G' + String(nextId++).padStart(3, '0');
+      usedIds.add(row[map['賓客ID']]);
     }
     changed++;
   }
@@ -119,12 +123,13 @@ function doGet(e) {
       operator: String(params.operator || '').trim(),
       station: String(params.station || '').trim()
     };
-  } else if (params.action === 'checkin') {
+  } else if (['guest', 'receive', 'cancel', 'checkin'].indexOf(params.action) !== -1) {
     payload = {
-      action: 'checkin',
+      action: params.action,
       guestId: String(params.guestId || params.t || params.token || '').trim(),
       sessionToken: String(params.sessionToken || '').trim(),
-      requestId: String(params.requestId || '').trim()
+      requestId: String(params.requestId || '').trim(),
+      receiptId: String(params.receiptId || '').trim()
     };
   } else if (params.action === 'lookup') {
     payload = {
@@ -196,26 +201,27 @@ function ensureGuestSheet_(ss) {
   }
 
   const existingMap = columnMap_(existingHeaders);
-  const missingHeaders = GUEST_HEADERS.filter(header => existingMap[header] === undefined);
+  const missingHeaders = ['賓客ID', '顯示姓名'].filter(header => existingMap[header] === undefined);
   if (missingHeaders.length) {
     throw new Error('Guests 缺少必要欄位：' + missingHeaders.join('、'));
   }
 
-  const isCanonical = GUEST_HEADERS.every((header, index) => existingHeaders[index] === header)
-    && existingHeaders.slice(GUEST_HEADERS.length).every(value => !value);
+  const isCanonical = GUEST_HEADERS.every((header, index) => existingHeaders[index] === header);
   if (isCanonical) return sheet;
 
   const rows = lastRow > 1
     ? sheet.getRange(2, 1, lastRow - 1, lastColumn).getValues()
     : [];
-  const migratedRows = rows.map(row => GUEST_HEADERS.map(header => row[existingMap[header]]));
+  // Preserve custom columns and their contents during canonical schema migration.
+  const extras = existingHeaders.map((header, index) => ({ header, index }))
+    .filter(item => GUEST_HEADERS.indexOf(item.header) === -1);
+  const migratedHeaders = GUEST_HEADERS.concat(extras.map(item => item.header));
+  const migratedRows = rows.map(row => GUEST_HEADERS.map(header => existingMap[header] === undefined ? '' : row[existingMap[header]])
+    .concat(extras.map(item => row[item.index])));
 
-  sheet.getRange(1, 1, 1, GUEST_HEADERS.length).setValues([GUEST_HEADERS]);
+  sheet.getRange(1, 1, 1, migratedHeaders.length).setValues([migratedHeaders]);
   if (migratedRows.length) {
-    sheet.getRange(2, 1, migratedRows.length, GUEST_HEADERS.length).setValues(migratedRows);
-  }
-  if (lastColumn > GUEST_HEADERS.length) {
-    sheet.getRange(1, GUEST_HEADERS.length + 1, lastRow, lastColumn - GUEST_HEADERS.length).clearContent();
+    sheet.getRange(2, 1, migratedRows.length, migratedHeaders.length).setValues(migratedRows);
   }
   return sheet;
 }
@@ -410,7 +416,8 @@ function parseApiPayload_(e) {
   }
 
   return {
-    action: String(payload.action || 'checkin').trim(),
+    action: String(payload.action || 'guest').trim(),
+    receiptId: String(payload.receiptId || '').trim(),
     guestId: String(payload.guestId || payload.token || payload.scan || '').trim(),
     pin: String(payload.pin || '').trim(),
     operator: String(payload.operator || '').trim(),
@@ -431,7 +438,11 @@ function safeApiCall_(payload, now) {
     }
 
     if (payload.action === 'checkin') {
-      return handleApiCheckin_(payload, now);
+      throw apiError_('UPGRADE_REQUIRED', '請重新整理新版頁面；掃描已改為查詢，不再自動報到');
+    }
+
+    if (['guest', 'receive', 'cancel'].indexOf(payload.action) !== -1) {
+      return handleGiftApi_(payload, now);
     }
 
     if (payload.action === 'lookup') {

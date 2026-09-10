@@ -26,6 +26,15 @@ const elements = {
   checkinModalMessage: document.querySelector('#checkinModalMessage'),
   nextGuestButton: document.querySelector('#nextGuestButton')
 };
+elements.receiveButton = document.querySelector('#receiveButton');
+elements.cancelReceiptButton = document.querySelector('#cancelReceiptButton');
+let selectedGuest = null;
+let giftBusy = false;
+
+elements.receiveButton.addEventListener('click', () => mutateGift('receive'));
+elements.cancelReceiptButton.addEventListener('click', () => {
+  if (selectedGuest && window.confirm('撤銷 ' + selectedGuest.displayName + ' 的待清點收件？')) mutateGift('cancel');
+});
 
 let scanner = null;
 let isScanning = false;
@@ -54,7 +63,7 @@ elements.manualForm.addEventListener('submit', event => {
     showResult('沒有輸入賓客 ID', '請輸入賓客 ID。', 'warn');
     return;
   }
-  enqueueCheckin(guestId, { source: 'manual' });
+  queryGuest(guestId, { source: 'manual' });
   elements.manualGuestId.value = '';
 });
 
@@ -68,9 +77,8 @@ async function startScanner() {
   if (!validateSettings()) return;
   if (!(await ensureSession())) return;
 
-  scanner = scanner || new Html5Qrcode('reader');
-
   try {
+    scanner = scanner || new Html5Qrcode('reader');
     await scanner.start(
       { facingMode: 'environment' },
       { fps: 10, qrbox: { width: 250, height: 250 } },
@@ -100,14 +108,14 @@ function onQrDecoded(decodedText) {
   const guestId = extractGuestId(decodedText);
 
   if (!guestId) return;
-  enqueueCheckin(guestId, { source: 'scanner' });
+  queryGuest(guestId, { source: 'scanner' });
 }
 
-async function enqueueCheckin(guestId, options = {}) {
+async function queryGuest(guestId, options = {}) {
   const isManual = options.source !== 'scanner';
   if (!checkinGate.begin()) {
     if (isManual) {
-      showResult('請先完成目前報到', '按「下一位」後再操作。', 'warn');
+      showResult('請先完成目前查詢', '按「下一位」後再操作。', 'warn');
     }
     return;
   }
@@ -131,9 +139,9 @@ async function enqueueCheckin(guestId, options = {}) {
 
   recentGuestIdScanAt.set(guestId, now);
   pruneRecentGuestIds(now);
-  submitCheckin(guestId);
+  await loadGuest(guestId);
 }
-async function submitCheckin(guestId) {
+async function loadGuest(guestId) {
   const settings = getSettings();
   const requestId = createRequestId();
   shouldResumeScannerAfterGate = isScanning;
@@ -142,10 +150,12 @@ async function submitCheckin(guestId) {
     if (shouldResumeScannerAfterGate) {
       await stopScanner();
     }
-    showResult('已送出報到', guestId + ' 已送出，請等待結果。', 'neutral');
+    selectedGuest = null;
+    updateGiftButtons();
+    showResult('查詢中', guestId + '：正在查詢桌號與紅包狀態。', 'neutral');
 
-    const data = await jsonpCheckin(settings, guestId, requestId);
-    renderApiResult(data, guestId);
+    const data = await jsonpGuest(settings, guestId, requestId);
+    renderGiftResult(data);
   } catch (err) {
     const message = messageOf(err) + '。請確認 Apps Script Web App URL 與工作階段設定。';
     showResult('API 呼叫失敗', message, 'error');
@@ -245,9 +255,9 @@ function jsonpSession(settings) {
   });
 }
 
-function jsonpCheckin(settings, guestId, requestId) {
+function jsonpGuest(settings, guestId, requestId) {
   return jsonpRequest(settings, {
-    action: 'checkin',
+    action: 'guest',
     guestId,
     sessionToken: settings.sessionToken || readSessionToken(),
     requestId
@@ -298,35 +308,6 @@ function handleUnauthorized(message) {
   showResult('工作階段已過期', message || '請重新輸入 PIN 後再試。', 'warn');
 }
 
-function renderApiResult(data, guestId) {
-  const result = data || {};
-  if (result.status === 'UNAUTHORIZED') {
-    handleUnauthorized('請重新輸入 PIN 後再試。');
-    checkinGate.reset();
-    shouldResumeScannerAfterGate = false;
-    addRecent(result.status, guestId, result.message || '請重新建立工作階段');
-    return;
-  }
-  const title = result.status === 'CHECKED_IN'
-    ? '報到成功'
-    : result.status === 'ALREADY_CHECKED_IN'
-      ? '已完成報到'
-      : (result.status || 'UNKNOWN') + ' ' + (result.displayName || '');
-  const detail = [
-    result.displayName ? '姓名 ' + result.displayName : '',
-    result.tableNo ? '桌號 ' + result.tableNo : '',
-    result.message || ''
-  ].filter(Boolean).join(' / ');
-  const tone = result.status === 'CHECKED_IN'
-    ? 'success'
-    : result.status === 'ALREADY_CHECKED_IN'
-      ? 'warn'
-      : 'error';
-  showResult(title.trim(), detail || guestId, tone);
-  addRecent(result.status || 'UNKNOWN', guestId, detail || result.message || '');
-  openCheckinGate(title.trim(), detail || guestId, tone);
-}
-
 function openCheckinGate(title, message, tone) {
   checkinGate.complete();
   elements.checkinModalCard.className = 'checkin-modal-card ' + (tone || 'neutral');
@@ -336,7 +317,53 @@ function openCheckinGate(title, message, tone) {
   elements.nextGuestButton.focus();
 }
 
+function updateGiftButtons() {
+  elements.receiveButton.hidden = !selectedGuest || selectedGuest.giftState !== '未收件';
+  elements.cancelReceiptButton.hidden = !selectedGuest || !selectedGuest.canCancel;
+  elements.receiveButton.disabled = giftBusy;
+  elements.cancelReceiptButton.disabled = giftBusy;
+  elements.nextGuestButton.disabled = giftBusy;
+}
+
+function renderGiftResult(data) {
+  if (!data || !data.ok) {
+    selectedGuest = null;
+    if (data && data.status === 'UNAUTHORIZED') handleUnauthorized(data.message);
+    updateGiftButtons();
+    openCheckinGate('請重新查詢', data && data.message || '無法取得資料', 'error');
+    return;
+  }
+  selectedGuest = data;
+  const detail = ['賓客編號：' + data.guestId, '桌號：' + (data.tableNo || '尚未分配'),
+    '紅包：' + data.giftState, data.message || ''].join('\n');
+  openCheckinGate(data.displayName, detail, data.giftState === '未收件' ? 'neutral' : 'success');
+  showResult(data.displayName, detail, 'neutral');
+  updateGiftButtons();
+}
+
+async function mutateGift(action) {
+  if (giftBusy || !selectedGuest) return;
+  const guest = selectedGuest;
+  giftBusy = true;
+  updateGiftButtons();
+  try {
+    const data = await jsonpRequest(getSettings(), { action, guestId: guest.guestId,
+      receiptId: guest.receiptId, sessionToken: readSessionToken(), requestId: createRequestId() });
+    renderGiftResult(data);
+    if (data && data.ok) addRecent(data.status, guest.guestId, guest.displayName + '：' + data.message);
+  } catch (err) {
+    selectedGuest = null;
+    openCheckinGate('收件狀態待確認', messageOf(err) + '。可能已寫入；請按下一位後重新查詢，核對狀態再操作。斷網時使用紙本備援。', 'error');
+  } finally {
+    giftBusy = false;
+    updateGiftButtons();
+  }
+}
+
 async function continueToNextGuest() {
+  if (giftBusy) return;
+  selectedGuest = null;
+  updateGiftButtons();
   const resumeScanner = shouldResumeScannerAfterGate;
   shouldResumeScannerAfterGate = false;
   elements.nextGuestButton.disabled = true;
@@ -375,17 +402,16 @@ function renderLookupResults(data) {
     ? '找到前 ' + results.length + ' 筆，請再縮小分類或輸入姓名。'
     : '找到 ' + results.length + ' 筆，請確認姓名與關係分類。';
   results.forEach(guest => {
-    const isCheckedIn = guest.checkInStatus === '已報到';
     const card = document.createElement('article');
-    card.className = 'lookup-card' + (isCheckedIn ? ' is-checked-in' : '');
+    card.className = 'lookup-card';
     const categoryText = guest.category ? '關係分類 ' + guest.category : '關係分類未填寫';
     const tableText = guest.tableNo ? '桌號 ' + guest.tableNo : '桌號尚未分配';
-    const checkInText = isCheckedIn ? '已報到' : '尚未報到';
+    const checkInText = '點選查看最新紅包狀態';
     card.innerHTML = [
       '<div class="lookup-card-title">' + escapeHtml(guest.displayName || '未命名賓客') + '</div>',
       '<div class="lookup-card-meta">',
       '<span>' + escapeHtml(categoryText) + '</span>',
-      '<span>' + escapeHtml(tableText) + ' / 預計 ' + escapeHtml(guest.expectedCount || 0) + ' 人</span>',
+      '<span>' + escapeHtml(tableText) + '</span>',
       '<span>' + escapeHtml(checkInText) + '</span>',
       '</div>'
     ].join('');
@@ -393,22 +419,10 @@ function renderLookupResults(data) {
     actions.className = 'lookup-actions';
     const button = document.createElement('button');
     button.type = 'button';
-    button.disabled = isCheckedIn || !guest.guestId;
-    button.textContent = isCheckedIn
-      ? '已報到'
-      : guest.guestId
-        ? '報到'
-        : '缺少賓客 ID';
+    button.disabled = !guest.guestId;
+    button.textContent = guest.guestId ? '查看桌號／紅包' : '缺少賓客 ID';
     button.addEventListener('click', () => {
-      const confirmation = [
-        '確認是這位賓客嗎？',
-        '姓名：' + (guest.displayName || '未命名賓客'),
-        '關係分類：' + (guest.category || '未填寫'),
-        tableText
-      ].join('\\n');
-      if (window.confirm(confirmation)) {
-        enqueueCheckin(guest.guestId, { source: 'lookup' });
-      }
+      queryGuest(guest.guestId, { source: 'lookup' });
     });
     actions.append(button);
     card.append(actions);
@@ -432,6 +446,10 @@ function extractGuestId(rawValue) {
 
 function validateSettings() {
   const settings = getSettings();
+  if (!settings.operator) {
+    showResult('缺少操作人員', '請填寫操作人員姓名。', 'warn');
+    return false;
+  }
   if (!settings.apiUrl) {
     showResult('缺少 API URL', '請先貼上 Apps Script Web App URL。', 'warn');
     return false;
@@ -448,7 +466,7 @@ function getSettings() {
     apiUrl: elements.apiUrl.value.trim(),
     pin: elements.pin.value.trim(),
 
-    operator: elements.operator.value.trim() || 'unknown',
+    operator: elements.operator.value.trim(),
     sessionToken: readSessionToken()
   };
 }
