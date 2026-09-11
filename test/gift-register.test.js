@@ -257,3 +257,58 @@ test('建立 session 時可在同一次 API 回應帶回登入快照', () => {
   assert.equal(result.guests[0].guestId, 'g001');
   assert.ok(result.serverMs >= 0);
 });
+
+test('登入快照後收件重用可信快取，不再讀 Guests 或 session Properties', () => {
+  const headers = load();
+  const guests = sheetDouble('Guests', [
+    Array.from(headers.GUEST_HEADERS),
+    ['g001', 'Tutu', '新郎朋友', '5', 2, '', '', '', '', '']
+  ]);
+  const gifts = sheetDouble('Gifts', [Array.from(headers.GIFT_HEADERS)]);
+  let guestReads = 0;
+  const originalGuestDataRange = guests.getDataRange;
+  guests.getDataRange = () => {
+    guestReads++;
+    return originalGuestDataRange();
+  };
+  const properties = new Map([['API_PIN', 'test-pin']]);
+  let sessionPropertyReads = 0;
+  const cache = new Map();
+  const ss = { getSheetByName: name => name === 'Guests' ? guests : gifts };
+  const api = load({
+    CacheService: { getScriptCache: () => ({
+      get: key => cache.get(key) || null,
+      put: (key, value) => cache.set(key, value),
+      remove: key => cache.delete(key)
+    }) },
+    PropertiesService: { getScriptProperties: () => ({
+      getProperty(key) {
+        if (key.startsWith('CHECKIN_SESSION_')) sessionPropertyReads++;
+        return properties.get(key) || null;
+      },
+      setProperty: (key, value) => properties.set(key, value),
+      deleteProperty: key => properties.delete(key)
+    }) },
+    Utilities: { getUuid: () => cache.has('uuid-used') ? 'receipt-id' : (cache.set('uuid-used', '1'), 'session-token'),
+      formatDate: date => date.toISOString() },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ss, flush() {} },
+    LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) }
+  });
+
+  const session = api.safeApiCall_({ action: 'session', pin: 'test-pin', operator: '工作人員',
+    includeGuestSnapshot: true }, new Date('2026-09-12T10:00:00Z'));
+  guestReads = 0;
+  sessionPropertyReads = 0;
+  const received = api.safeApiCall_({ action: 'receive', guestId: 'g001',
+    sessionToken: session.sessionToken, requestId: 'request-1' }, new Date('2026-09-12T10:01:00Z'));
+
+  assert.equal(received.status, 'RECEIVED');
+  assert.ok(received.authMs >= 0);
+  assert.ok(received.guestLookupMs >= 0);
+  assert.ok(received.giftReadMs >= 0);
+  assert.ok(received.giftWriteMs >= 0);
+  assert.ok(received.flushMs >= 0);
+  assert.equal(guestReads, 0, '收件不應重新讀取登入時已快取的 Guests');
+  assert.equal(sessionPropertyReads, 0, '收件不應重新讀取已快取的 session property');
+  assert.equal(gifts.data.length, 2, '收件仍必須寫入 Gifts');
+});

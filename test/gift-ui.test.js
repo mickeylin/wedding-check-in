@@ -64,11 +64,16 @@ test('收件提交中擋連點與下一位；成功後才顯示撤銷', async ()
   await f.ui.mutate('receive');
   assert.equal(f.requests.filter(request => request.action === 'receive').length, 1);
   assert.equal(f.nodes.get('#nextGuestButton').disabled, true);
-  resolve({ ...f.guest, status: 'RECEIVED', giftState: '待清點', receiptId: 'receipt', canCancel: true });
+  assert.match(f.nodes.get('#checkinModalMessage').textContent, /G001/);
+  resolve({ ...f.guest, status: 'RECEIVED', giftState: '待清點', receiptId: 'receipt', canCancel: true,
+    serverMs: 1200, lockWaitMs: 20, authMs: 5, guestLookupMs: 3, giftReadMs: 300,
+    giftWriteMs: 400, flushMs: 200 });
   await pending;
   assert.equal(f.nodes.get('#receiveButton').hidden, true);
   assert.equal(f.nodes.get('#cancelReceiptButton').hidden, false);
   assert.equal(f.nodes.get('#nextGuestButton').disabled, false);
+  assert.match(f.nodes.get('#timingStatus').textContent, /驗證工作階段/);
+  assert.match(f.nodes.get('#timingStatus').textContent, /確認寫入/);
 });
 
 test('回應逾時隱藏寫入按鈕並要求核對，不自動重試', async () => {

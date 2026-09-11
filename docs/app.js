@@ -342,7 +342,10 @@ function jsonpRequest(settings, params) {
     window[callbackName] = data => {
       // Timing only: no PIN, token, guest identity or amounts in diagnostics.
       window.lastGiftTiming = { action: params.action, totalMs: Date.now() - started,
-        serverMs: data && data.serverMs, lockWaitMs: data && data.lockWaitMs };
+        serverMs: data && data.serverMs, lockWaitMs: data && data.lockWaitMs,
+        authMs: data && data.authMs, guestLookupMs: data && data.guestLookupMs,
+        giftReadMs: data && data.giftReadMs, giftWriteMs: data && data.giftWriteMs,
+        flushMs: data && data.flushMs };
       cleanup();
       resolve(data);
     };
@@ -417,7 +420,7 @@ async function mutateGift(action) {
   giftBusy = true;
   updateGiftButtons();
   elements.checkinModalMessage.textContent = action === 'receive'
-    ? '正在登記收到紅包，請稍候確認結果…'
+    ? '正在登記收到紅包；請先在紅包寫上賓客編號 ' + guest.guestId + '，並等候成功確認…'
     : '正在撤銷收件，請稍候確認結果…';
   try {
     const data = await jsonpRequest(getSettings(), { action, guestId: guest.guestId,
@@ -447,6 +450,11 @@ function recordGiftTiming(label, started, data, sessionMs = 0) {
   } else if (data && typeof data.serverMs === 'number') {
     lines.push('後端處理：' + seconds(data.serverMs));
     lines.push('其中等鎖：' + seconds(data.lockWaitMs || 0));
+    if (typeof data.authMs === 'number') lines.push('其中驗證工作階段：' + seconds(data.authMs));
+    if (typeof data.guestLookupMs === 'number') lines.push('其中取得賓客：' + seconds(data.guestLookupMs));
+    if (typeof data.giftReadMs === 'number') lines.push('其中讀取禮金：' + seconds(data.giftReadMs));
+    if (typeof data.giftWriteMs === 'number') lines.push('其中寫入禮金：' + seconds(data.giftWriteMs));
+    if (typeof data.flushMs === 'number') lines.push('其中確認寫入：' + seconds(data.flushMs));
     lines.push('其餘往返／平台／頁面：' + seconds(Math.max(0, totalMs - sessionMs - data.serverMs)));
   } else {
     lines.push('後端耗時未提供（舊部署或請求失敗）');

@@ -26,6 +26,7 @@ const SCAN_LOG_HEADERS = [
 const API_STATION_NAME = 'GitHubPages';
 const SESSION_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
 const SESSION_PROPERTY_PREFIX = 'CHECKIN_SESSION_';
+const SCRIPT_CACHE_MAX_TTL_SECONDS = 6 * 60 * 60;
 const LOOKUP_MAX_RESULTS = 100;
 const GUEST_COL = columnMap_(GUEST_HEADERS);
 
@@ -528,6 +529,34 @@ function normalizeApiTime_(value) {
   return value instanceof Date ? value : new Date(value || new Date());
 }
 
+function getScriptCache_() {
+  try {
+    return typeof CacheService !== 'undefined' && CacheService
+      ? CacheService.getScriptCache()
+      : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function safeCacheGet_(key) {
+  const cache = getScriptCache_();
+  if (!cache) return null;
+  try { return cache.get(key); } catch (err) { return null; }
+}
+
+function safeCachePut_(key, value, ttlSeconds) {
+  const cache = getScriptCache_();
+  if (!cache) return;
+  try { cache.put(key, value, Math.max(1, Math.min(SCRIPT_CACHE_MAX_TTL_SECONDS, ttlSeconds))); } catch (err) {}
+}
+
+function safeCacheRemove_(key) {
+  const cache = getScriptCache_();
+  if (!cache) return;
+  try { cache.remove(key); } catch (err) {}
+}
+
 function handleApiSession_(payload, now) {
   const input = payload || {};
   const currentTime = normalizeApiTime_(now);
@@ -542,10 +571,10 @@ function handleApiSession_(payload, now) {
   const expiresAt = currentTime.getTime() + SESSION_TOKEN_TTL_MS;
   const session = { operator, station, expiresAt };
 
-  PropertiesService.getScriptProperties().setProperty(
-    SESSION_PROPERTY_PREFIX + sessionToken,
-    JSON.stringify(session)
-  );
+  const propertyKey = SESSION_PROPERTY_PREFIX + sessionToken;
+  const serialized = JSON.stringify(session);
+  PropertiesService.getScriptProperties().setProperty(propertyKey, serialized);
+  safeCachePut_(propertyKey, serialized, Math.ceil(SESSION_TOKEN_TTL_MS / 1000));
 
   return {
     ok: true,
@@ -564,7 +593,9 @@ function verifySessionToken_(sessionToken, now) {
   }
 
   const propertyKey = SESSION_PROPERTY_PREFIX + token;
-  const raw = PropertiesService.getScriptProperties().getProperty(propertyKey);
+  let raw = safeCacheGet_(propertyKey);
+  const cacheHit = !!raw;
+  if (!raw) raw = PropertiesService.getScriptProperties().getProperty(propertyKey);
   if (!raw) {
     throw apiError_('UNAUTHORIZED', 'session token 無效或已過期');
   }
@@ -573,14 +604,21 @@ function verifySessionToken_(sessionToken, now) {
   try {
     session = JSON.parse(raw);
   } catch (err) {
+    safeCacheRemove_(propertyKey);
     PropertiesService.getScriptProperties().deleteProperty(propertyKey);
     throw apiError_('UNAUTHORIZED', 'session token 無效或已過期');
   }
 
   const currentTime = normalizeApiTime_(now);
   if (!session.expiresAt || currentTime.getTime() >= Number(session.expiresAt)) {
+    safeCacheRemove_(propertyKey);
     PropertiesService.getScriptProperties().deleteProperty(propertyKey);
     throw apiError_('UNAUTHORIZED', 'session token 已過期');
+  }
+
+  if (!cacheHit) {
+    safeCachePut_(propertyKey, raw,
+      Math.ceil((Number(session.expiresAt) - currentTime.getTime()) / 1000));
   }
 
   return session;

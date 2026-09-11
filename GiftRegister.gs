@@ -3,6 +3,7 @@ const GIFT_HEADERS = ['收件ID', '賓客ID', '顯示姓名', '紅包署名', '�
   '收件人員', '收件時間', '清點人員', '清點時間', '備註', '收件請求ID',
   '撤銷人員', '撤銷時間', '撤銷請求ID'];
 const GIFT_AUDIT_HEADERS = ['時間', '操作人員', '動作', '收件ID', '賓客ID', '變更內容'];
+const GIFT_GUEST_CACHE_KEY = 'GIFT_GUEST_SNAPSHOT_V1';
 
 function setupGiftRegister_(ss) {
   const gifts = requireGiftSchema_(ss, 'Gifts', GIFT_HEADERS, true);
@@ -85,7 +86,33 @@ function createGiftSnapshot_(ss) {
       tableNo: guest.tableNo
     }, giftStatus_(giftsByGuest[guest.guestId] || [])));
 
+  cacheGiftGuests_(guests);
   return { guests, snapshotCreatedAt: new Date().toISOString() };
+}
+
+function cacheGiftGuests_(guests) {
+  const guestIndex = Object.create(null);
+  guests.forEach(guest => {
+    guestIndex[guest.guestId] = {
+      guestId: guest.guestId,
+      displayName: guest.displayName,
+      category: guest.category,
+      tableNo: guest.tableNo
+    };
+  });
+  safeCachePut_(GIFT_GUEST_CACHE_KEY, JSON.stringify(guestIndex), SCRIPT_CACHE_MAX_TTL_SECONDS);
+}
+
+function findCachedGiftGuest_(guestId) {
+  const raw = safeCacheGet_(GIFT_GUEST_CACHE_KEY);
+  if (!raw) return null;
+  try {
+    const guests = JSON.parse(raw);
+    return Object.prototype.hasOwnProperty.call(guests, guestId) ? guests[guestId] : null;
+  } catch (err) {
+    safeCacheRemove_(GIFT_GUEST_CACHE_KEY);
+    return null;
+  }
 }
 
 function createGiftModule_(deps) {
@@ -143,8 +170,8 @@ function createGiftStore_(ss) {
   const sheet = getRequiredSheet_(ss, 'Gifts');
   return {
     list() {
-      // One value read includes headers and records; no schema or state cache.
-      const values = sheet.getDataRange().getValues();
+      // Read only the ledger schema columns; user-added formatting or columns must not inflate each receipt request.
+      const values = sheet.getRange(1, 1, Math.max(1, sheet.getLastRow()), GIFT_HEADERS.length).getValues();
       if (GIFT_HEADERS.some((header, i) => !values[0] || values[0][i] !== header)) {
         throw apiError_('CONFIG_ERROR', 'Gifts 欄位順序不符，請勿直接搬移欄位');
       }
@@ -176,29 +203,63 @@ function sheetText_(value) {
 function handleGiftApi_(payload, now) {
   const started = Date.now();
   let lockWaitMs = 0;
+  let guestLookupMs = 0;
+  let giftReadMs = 0;
+  let giftWriteMs = 0;
+  let flushMs = 0;
+  const authStarted = Date.now();
   const session = verifySessionToken_(payload.sessionToken, now);
+  const authMs = Date.now() - authStarted;
   const ss = getSpreadsheet_();
   const lock = { runExclusive(callback) {
     const waiting = Date.now();
     return createScriptLock_(5000).runExclusive(() => {
       lockWaitMs = Date.now() - waiting;
-      try { return callback(); } finally { SpreadsheetApp.flush(); }
+      try { return callback(); } finally {
+        const flushing = Date.now();
+        try { SpreadsheetApp.flush(); } finally { flushMs += Date.now() - flushing; }
+      }
     });
   } };
   const module = createGiftModule_({ lock, guests: { findById(guestId) {
-    const values = getRequiredSheet_(ss, 'Guests').getDataRange().getValues();
-    if (GUEST_HEADERS.some((header, i) => !values[0] || values[0][i] !== header)) {
-      throw apiError_('CONFIG_ERROR', 'Guests 欄位順序不符，請先執行 setupSheet');
+    const lookingUp = Date.now();
+    try {
+      const cached = findCachedGiftGuest_(guestId);
+      if (cached) return cached;
+      const values = getRequiredSheet_(ss, 'Guests').getDataRange().getValues();
+      if (GUEST_HEADERS.some((header, i) => !values[0] || values[0][i] !== header)) {
+        throw apiError_('CONFIG_ERROR', 'Guests 欄位順序不符，請先執行 setupSheet');
+      }
+      const rows = values.slice(1).filter(row => String(row[0] || '').trim() === guestId);
+      if (rows.length > 1) throw apiError_('CONFIG_ERROR', '賓客編號重複，請先整理名單');
+      return rows.length ? guestRecordFromRow_(rows[0]) : null;
+    } finally {
+      guestLookupMs += Date.now() - lookingUp;
     }
-    const rows = values.slice(1).filter(row => String(row[0] || '').trim() === guestId);
-    if (rows.length > 1) throw apiError_('CONFIG_ERROR', '賓客編號重複，請先整理名單');
-    return rows.length ? guestRecordFromRow_(rows[0]) : null;
   } },
-    store: createGiftStore_(ss), clock: () => now, uuid: () => Utilities.getUuid() });
+    store: (() => {
+      const store = createGiftStore_(ss);
+      return {
+        list() {
+          const reading = Date.now();
+          try { return store.list(); } finally { giftReadMs += Date.now() - reading; }
+        },
+        receive(record) {
+          const writing = Date.now();
+          try { return store.receive(record); } finally { giftWriteMs += Date.now() - writing; }
+        },
+        cancel(record, operator, currentTime, requestId) {
+          const writing = Date.now();
+          try { return store.cancel(record, operator, currentTime, requestId); }
+          finally { giftWriteMs += Date.now() - writing; }
+        }
+      };
+    })(), clock: () => now, uuid: () => Utilities.getUuid() });
   const result = module.execute(Object.assign({}, payload, {
     guestId: extractGuestId_(payload.guestId), operator: session.operator
   }));
-  return Object.assign(result, { serverMs: Date.now() - started, lockWaitMs });
+  return Object.assign(result, { serverMs: Date.now() - started, lockWaitMs,
+    authMs, guestLookupMs, giftReadMs, giftWriteMs, flushMs });
 }
 
 function installGiftEditTrigger() {
