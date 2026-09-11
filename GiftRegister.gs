@@ -55,6 +55,39 @@ function giftStatus_(records) {
     envelopeCount: active.length };
 }
 
+function createGiftSnapshot_(ss) {
+  const guestValues = getRequiredSheet_(ss, 'Guests').getDataRange().getValues();
+  if (GUEST_HEADERS.some((header, i) => !guestValues[0] || guestValues[0][i] !== header)) {
+    throw apiError_('CONFIG_ERROR', 'Guests 欄位順序不符，請先執行 setupSheet');
+  }
+  const giftValues = getRequiredSheet_(ss, 'Gifts').getDataRange().getValues();
+  if (GIFT_HEADERS.some((header, i) => !giftValues[0] || giftValues[0][i] !== header)) {
+    throw apiError_('CONFIG_ERROR', 'Gifts 欄位順序不符，請勿直接搬移欄位');
+  }
+
+  const giftsByGuest = Object.create(null);
+  giftValues.slice(1).map((row, i) => giftRecord_(row, i + 2))
+    .filter(record => record.guestId || record.receiptId)
+    .forEach(record => {
+      if (!giftsByGuest[record.guestId]) giftsByGuest[record.guestId] = [];
+      giftsByGuest[record.guestId].push(record);
+    });
+
+  const guests = guestValues.slice(1).map(guestRecordFromRow_)
+    .filter(guest => guest.guestId && guest.displayName)
+    .map(guest => Object.assign({
+      ok: true,
+      status: 'SNAPSHOT_GUEST',
+      message: '本機快照；收件時會由後端確認最新狀態',
+      guestId: guest.guestId,
+      displayName: guest.displayName,
+      category: guest.category,
+      tableNo: guest.tableNo
+    }, giftStatus_(giftsByGuest[guest.guestId] || [])));
+
+  return { guests, snapshotCreatedAt: new Date().toISOString() };
+}
+
 function createGiftModule_(deps) {
   return {
     execute(input) {

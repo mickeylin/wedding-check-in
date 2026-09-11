@@ -17,7 +17,7 @@ function loadUi() {
     localStorage: { getItem() {}, setItem() {} }, confirm: () => true, crypto: { randomUUID: () => 'request' } };
   const context = { window, document: { querySelector: selector => { if (!nodes.has(selector)) nodes.set(selector, node()); return nodes.get(selector); }, createElement: node }, Date, Map, URL };
   const source = ['checkin-gate.js', 'app.js'].map(file => fs.readFileSync(path.join(__dirname, '..', 'docs', file), 'utf8')).join('\n');
-  vm.runInNewContext(source + '\nthis.ui = { start: startScanner, stop: stopScanner, query: queryGuest, mutate: mutateGift, next: continueToNextGuest, render: renderGiftResult };', context);
+  vm.runInNewContext(source + '\nthis.ui = { start: startScanner, stop: stopScanner, query: queryGuest, mutate: mutateGift, next: continueToNextGuest, render: renderGiftResult, save: saveSettings, sessionToken: readSessionToken, snapshot: typeof applyGuestSnapshot === "function" ? applyGuestSnapshot : null, searchSnapshot: typeof searchGuestSnapshot === "function" ? searchGuestSnapshot : null };', context);
   nodes.get('#apiUrl').value = 'https://example.test/exec';
   nodes.get('#operator').value = '工作人員';
   const requests = [];
@@ -102,4 +102,51 @@ test('手機測速顯示查詢總時間與後端時間，不暴露賓客或 toke
   assert.match(text, /0\.78/);
   assert.match(text, /4\.07/);
   assert.doesNotMatch(text, /G001|測試賓客|valid/);
+});
+
+test('儲存設定時立即建立 session，不把登入延遲留給第一筆查詢', async () => {
+  const f = loadUi();
+  f.nodes.get('#pin').value = 'test-pin';
+  f.context.jsonpRequest = async (settings, request) => {
+    f.requests.push(request);
+    return { ok: true, status: 'SESSION_CREATED', sessionToken: 'fresh-session' };
+  };
+
+  const connected = await f.ui.save();
+
+  assert.equal(connected, true);
+  assert.deepEqual(f.requests.map(request => request.action), ['session']);
+  assert.equal(f.ui.sessionToken(), 'fresh-session');
+});
+
+test('已登入快照讓賓客查詢立即顯示，不等待 Apps Script 往返', async () => {
+  const f = loadUi();
+  assert.equal(typeof f.ui.snapshot, 'function');
+  f.ui.snapshot([{ ...f.guest, guestId: 'g001' }]);
+  f.context.jsonpRequest = async (settings, request) => {
+    f.requests.push(request);
+    return { ...f.guest, guestId: 'g001', serverMs: 1600, lockWaitMs: 0 };
+  };
+
+  await f.ui.query('g001');
+
+  assert.equal(f.nodes.get('#checkinModal').hidden, false);
+  assert.match(f.nodes.get('#checkinModalMessage').textContent, /桌號：3/);
+  assert.equal(f.requests.length, 0, '顯示賓客不應等待遠端請求');
+  assert.match(f.nodes.get('#timingStatus').textContent, /本機快照/);
+});
+
+test('姓名與分類查找也使用登入快照', () => {
+  const f = loadUi();
+  f.ui.snapshot([
+    { ...f.guest, guestId: 'g001', displayName: 'Tutu', category: '男方朋友' },
+    { ...f.guest, guestId: 'g002', displayName: '共同好友', category: '共同朋友' },
+    { ...f.guest, guestId: 'g003', displayName: '女方家人', category: '女方家人' }
+  ]);
+
+  const byName = f.ui.searchSnapshot('tutu', '');
+  const byCategory = f.ui.searchSnapshot('', '男方朋友');
+
+  assert.deepEqual(Array.from(byName.results, guest => guest.guestId), ['g001']);
+  assert.deepEqual(Array.from(byCategory.results, guest => guest.guestId), ['g002', 'g001']);
 });

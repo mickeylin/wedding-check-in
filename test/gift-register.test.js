@@ -7,7 +7,7 @@ const vm = require('node:vm');
 function load(overrides = {}) {
   const source = ['Code.gs', 'GiftRegister.gs'].map(file => fs.readFileSync(path.join(__dirname, '..', file), 'utf8')).join('\n');
   const context = { Utilities: { formatDate: date => date.toISOString() }, Session: { getScriptTimeZone: () => 'Asia/Taipei' }, ...overrides };
-  vm.runInNewContext(source + '\nthis.api = { handleGiftApi_, createGiftModule_, safeApiCall_, giftStatus_, auditGiftEdit, ensureGuestSheet_, generateGuestIds, GIFT_HEADERS, GUEST_HEADERS };', context);
+  vm.runInNewContext(source + '\nthis.api = { handleGiftApi_, createGiftSnapshot_, createGiftModule_, safeApiCall_, giftStatus_, auditGiftEdit, ensureGuestSheet_, generateGuestIds, GIFT_HEADERS, GUEST_HEADERS };', context);
   return context.api;
 }
 
@@ -205,4 +205,55 @@ test('正式 API adapter 每次只讀取兩表各一次；查詢零鎖零 flush�
   gifts.data[1][4] = '已清點';
   gifts.data[1][5] = 3600;
   assert.equal(call('guest').giftState, '已清點', '不快取過時收件狀態');
+});
+
+test('登入快照一次讀取賓客與禮金，提供本機查詢所需狀態', () => {
+  const headers = load();
+  const guests = sheetDouble('Guests', [
+    Array.from(headers.GUEST_HEADERS),
+    ['g001', 'Tutu', '新郎朋友', '5', 2, '', '', '', '', ''],
+    ['g002', '另一位', '新娘朋友', '8', 1, '', '', '', '', '']
+  ]);
+  const gifts = sheetDouble('Gifts', [
+    Array.from(headers.GIFT_HEADERS),
+    ['receipt-1', 'g001', 'Tutu', '', '待清點', '', '工作人員', new Date(), '', '', '', 'request-1', '', '', '']
+  ]);
+  const snapshot = headers.createGiftSnapshot_({
+    getSheetByName: name => name === 'Guests' ? guests : gifts
+  });
+
+  assert.equal(snapshot.guests.length, 2);
+  assert.equal(snapshot.guests[0].guestId, 'g001');
+  assert.equal(snapshot.guests[0].tableNo, '5');
+  assert.equal(snapshot.guests[0].giftState, '待清點');
+  assert.equal(snapshot.guests[1].giftState, '未收件');
+});
+
+test('建立 session 時可在同一次 API 回應帶回登入快照', () => {
+  const headers = load();
+  const guests = sheetDouble('Guests', [
+    Array.from(headers.GUEST_HEADERS),
+    ['g001', 'Tutu', '新郎朋友', '5', 2, '', '', '', '', '']
+  ]);
+  const gifts = sheetDouble('Gifts', [Array.from(headers.GIFT_HEADERS)]);
+  const properties = new Map([['API_PIN', 'test-pin']]);
+  const api = load({
+    PropertiesService: { getScriptProperties: () => ({
+      getProperty: key => properties.get(key) || null,
+      setProperty: (key, value) => properties.set(key, value)
+    }) },
+    Utilities: { getUuid: () => 'session-token', formatDate: date => date.toISOString() },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({
+      getSheetByName: name => name === 'Guests' ? guests : gifts
+    }) }
+  });
+
+  const result = api.safeApiCall_({ action: 'session', pin: 'test-pin', operator: '工作人員',
+    includeGuestSnapshot: true }, new Date('2026-09-12T10:00:00Z'));
+
+  assert.equal(result.status, 'SESSION_CREATED');
+  assert.equal(result.sessionToken, 'session-token');
+  assert.equal(result.guests.length, 1);
+  assert.equal(result.guests[0].guestId, 'g001');
+  assert.ok(result.serverMs >= 0);
 });

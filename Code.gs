@@ -121,7 +121,8 @@ function doGet(e) {
       action: 'session',
       pin: String(params.pin || '').trim(),
       operator: String(params.operator || '').trim(),
-      station: String(params.station || '').trim()
+      station: String(params.station || '').trim(),
+      includeGuestSnapshot: String(params.includeGuestSnapshot || '').trim() === '1'
     };
   } else if (['guest', 'receive', 'cancel', 'checkin'].indexOf(params.action) !== -1) {
     payload = {
@@ -425,14 +426,22 @@ function parseApiPayload_(e) {
     query: String(payload.query || '').trim(),
     category: String(payload.category || payload.side || '').trim(),
     sessionToken: String(payload.sessionToken || '').trim(),
-    requestId: String(payload.requestId || '').trim()
+    requestId: String(payload.requestId || '').trim(),
+    includeGuestSnapshot: payload.includeGuestSnapshot === true || String(payload.includeGuestSnapshot || '') === '1'
   };
 }
 
 function safeApiCall_(payload, now) {
   try {
     if (payload.action === 'session') {
-      return Object.assign({}, handleApiSession_(payload, now), {
+      const started = Date.now();
+      const result = handleApiSession_(payload, now);
+      if (payload.includeGuestSnapshot) {
+        Object.assign(result, createGiftSnapshot_(getSpreadsheet_()), {
+          serverMs: Date.now() - started
+        });
+      }
+      return Object.assign({}, result, {
         processedAt: formatDate_(now)
       });
     }

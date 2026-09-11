@@ -1,5 +1,7 @@
 const STORAGE_KEY = 'wedding-check-in-settings';
 const SESSION_STORAGE_KEY = 'wedding-check-in-session-token';
+const SESSION_EXPIRES_STORAGE_KEY = 'wedding-check-in-session-expires-at';
+const GUEST_SNAPSHOT_STORAGE_KEY = 'wedding-check-in-guest-snapshot';
 const DUPLICATE_SCAN_COOLDOWN_MS = 2500;
 
 const elements = {
@@ -31,6 +33,7 @@ elements.cancelReceiptButton = document.querySelector('#cancelReceiptButton');
 elements.timingStatus = document.querySelector('#timingStatus');
 let selectedGuest = null;
 let giftBusy = false;
+const guestSnapshot = new Map();
 
 elements.receiveButton.addEventListener('click', () => mutateGift('receive'));
 elements.cancelReceiptButton.addEventListener('click', () => {
@@ -46,11 +49,19 @@ const checkinGate = window.CheckinGate.create();
 let shouldResumeScannerAfterGate = false;
 
 loadSettings();
+loadGuestSnapshot();
 updateConnectionStatus();
 
-elements.saveSettingsButton.addEventListener('click', () => {
-  saveSettings();
-  showResult('設定已儲存', '可以開始掃描。', 'success');
+elements.saveSettingsButton.addEventListener('click', async () => {
+  elements.saveSettingsButton.disabled = true;
+  showResult('正在登入', '正在建立工作階段，完成後即可開始掃描。', 'neutral');
+  try {
+    if (await saveSettings()) {
+      showResult('設定已儲存', '登入完成，可以開始掃描。', 'success');
+    }
+  } finally {
+    elements.saveSettingsButton.disabled = false;
+  }
 });
 
 elements.startButton.addEventListener('click', startScanner);
@@ -156,9 +167,17 @@ async function loadGuest(guestId, operationStarted = Date.now(), sessionMs = 0) 
     // Keep the camera stream alive instead of waiting for stop/start per guest.
     selectedGuest = null;
     updateGiftButtons();
+    const cached = guestSnapshot.get(guestId);
+    if (cached) {
+      const data = { ...cached, ok: true, localSnapshot: true };
+      recordGiftTiming('查詢', operationStarted, data, sessionMs);
+      renderGiftResult(data);
+      return;
+    }
     showResult('查詢中', guestId + '：正在查詢桌號與紅包狀態。', 'neutral');
 
     const data = await jsonpGuest(settings, guestId, requestId);
+    rememberGuest(data);
     recordGiftTiming('查詢', operationStarted, data, sessionMs);
     renderGiftResult(data);
   } catch (err) {
@@ -192,6 +211,10 @@ async function searchGuests() {
     return;
   }
   if (!(await ensureSession())) return;
+  if (guestSnapshot.size) {
+    renderLookupResults(searchGuestSnapshot(query, category));
+    return;
+  }
   elements.lookupStatus.textContent = '查找中⋯';
   elements.lookupResults.replaceChildren();
   try {
@@ -200,6 +223,38 @@ async function searchGuests() {
   } catch (err) {
     elements.lookupStatus.textContent = '查找失敗：' + messageOf(err);
   }
+}
+
+function searchGuestSnapshot(query, category) {
+  const normalizedQuery = normalizeLookupText(query);
+  const categories = lookupCategoriesForFilter(category);
+  const matches = Array.from(guestSnapshot.values()).filter(guest => {
+    if (categories.length && !categories.includes(normalizeLookupText(guest.category))) return false;
+    return !normalizedQuery
+      || normalizeLookupText(guest.displayName).includes(normalizedQuery)
+      || normalizeLookupText(guest.guestId).includes(normalizedQuery);
+  }).sort((left, right) => String(left.displayName).localeCompare(String(right.displayName)));
+  return {
+    ok: true,
+    status: matches.length ? 'LOOKUP_RESULTS' : 'NO_MATCHES',
+    results: matches.slice(0, 100),
+    hasMore: matches.length > 100,
+    message: matches.length ? '' : '找不到符合的賓客'
+  };
+}
+
+function normalizeLookupText(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function lookupCategoriesForFilter(category) {
+  const normalized = normalizeLookupText(category);
+  if (!normalized) return [];
+  if (normalized === normalizeLookupText('男方朋友')
+    || normalized === normalizeLookupText('女方朋友')) {
+    return [normalized, normalizeLookupText('共同朋友')];
+  }
+  return [normalized];
 }
 
 function jsonpLookup(settings, query, category) {
@@ -235,6 +290,10 @@ function ensureSession() {
       }
 
       window.sessionStorage.setItem(SESSION_STORAGE_KEY, data.sessionToken);
+      if (data.expiresAt) {
+        window.sessionStorage.setItem(SESSION_EXPIRES_STORAGE_KEY, String(data.expiresAt));
+      }
+      if (Array.isArray(data.guests)) applyGuestSnapshot(data.guests);
       return true;
     })
     .catch(err => {
@@ -256,8 +315,8 @@ function jsonpSession(settings) {
   return jsonpRequest(settings, {
     action: 'session',
     pin: settings.pin,
-
-    operator: settings.operator
+    operator: settings.operator,
+    includeGuestSnapshot: '1'
   });
 }
 
@@ -363,6 +422,7 @@ async function mutateGift(action) {
   try {
     const data = await jsonpRequest(getSettings(), { action, guestId: guest.guestId,
       receiptId: guest.receiptId, sessionToken: readSessionToken(), requestId: createRequestId() });
+    rememberGuest(data);
     recordGiftTiming(action === 'receive' ? '收件' : '撤銷', operationStarted, data);
     renderGiftResult(data);
     if (data && data.ok) addRecent(data.status, guest.guestId, guest.displayName + '：' + data.message);
@@ -382,7 +442,9 @@ function recordGiftTiming(label, started, data, sessionMs = 0) {
   const seconds = ms => (ms / 1000).toFixed(2) + ' 秒';
   const lines = [label + '總等待：' + seconds(totalMs)];
   if (sessionMs > 0) lines.push('其中登入：' + seconds(sessionMs));
-  if (data && typeof data.serverMs === 'number') {
+  if (data && data.localSnapshot) {
+    lines.push('資料來源：本機快照（收件仍由後端確認）');
+  } else if (data && typeof data.serverMs === 'number') {
     lines.push('後端處理：' + seconds(data.serverMs));
     lines.push('其中等鎖：' + seconds(data.lockWaitMs || 0));
     lines.push('其餘往返／平台／頁面：' + seconds(Math.max(0, totalMs - sessionMs - data.serverMs)));
@@ -503,7 +565,7 @@ function getSettings() {
   };
 }
 
-function saveSettings() {
+async function saveSettings() {
   const settings = getSettings();
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
     apiUrl: settings.apiUrl,
@@ -513,6 +575,7 @@ function saveSettings() {
   clearSessionToken();
   sessionPromise = null;
   updateConnectionStatus();
+  return ensureSession();
 }
 
 function loadSettings() {
@@ -537,11 +600,49 @@ function loadSettings() {
 }
 
 function readSessionToken() {
-  return window.sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
+  const token = window.sessionStorage.getItem(SESSION_STORAGE_KEY) || '';
+  const expiresAt = Number(window.sessionStorage.getItem(SESSION_EXPIRES_STORAGE_KEY) || 0);
+  if (token && expiresAt && Date.now() >= expiresAt) {
+    clearSessionToken();
+    return '';
+  }
+  return token;
 }
 
 function clearSessionToken() {
   window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  window.sessionStorage.removeItem(SESSION_EXPIRES_STORAGE_KEY);
+  window.sessionStorage.removeItem(GUEST_SNAPSHOT_STORAGE_KEY);
+  guestSnapshot.clear();
+}
+
+function applyGuestSnapshot(guests) {
+  guestSnapshot.clear();
+  (Array.isArray(guests) ? guests : []).forEach(guest => rememberGuest(guest, false));
+  window.sessionStorage.setItem(GUEST_SNAPSHOT_STORAGE_KEY,
+    JSON.stringify(Array.from(guestSnapshot.values())));
+}
+
+function loadGuestSnapshot() {
+  const raw = window.sessionStorage.getItem(GUEST_SNAPSHOT_STORAGE_KEY);
+  if (!raw) return;
+  try {
+    applyGuestSnapshot(JSON.parse(raw));
+  } catch (err) {
+    window.sessionStorage.removeItem(GUEST_SNAPSHOT_STORAGE_KEY);
+    guestSnapshot.clear();
+  }
+}
+
+function rememberGuest(guest, persist = true) {
+  if (!guest || !guest.ok || !guest.guestId) return;
+  const stored = { ...guest };
+  delete stored.localSnapshot;
+  guestSnapshot.set(stored.guestId, stored);
+  if (persist) {
+    window.sessionStorage.setItem(GUEST_SNAPSHOT_STORAGE_KEY,
+      JSON.stringify(Array.from(guestSnapshot.values())));
+  }
 }
 
 function createRequestId() {
