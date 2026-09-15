@@ -22,18 +22,25 @@ function loadUi(options = {}) {
     setItem: (key, value) => local.set(key, value),
     removeItem: key => local.delete(key)
   };
+  const timeoutDelays = [];
+  const appendedScripts = [];
   const window = { sessionStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     localStorage, confirm: () => true, crypto: { randomUUID: () => 'request' },
-    setTimeout: () => 0, clearTimeout() {}, addEventListener() {} };
-  const context = { window, navigator: { onLine: options.online !== false }, document: { querySelector: selector => { if (!nodes.has(selector)) nodes.set(selector, node()); return nodes.get(selector); }, createElement: node }, Date, Map, URL };
+    setTimeout: (callback, delay) => { timeoutDelays.push(delay); return timeoutDelays.length; }, clearTimeout() {}, addEventListener() {} };
+  const document = {
+    querySelector: selector => { if (!nodes.has(selector)) nodes.set(selector, node()); return nodes.get(selector); },
+    createElement: node,
+    body: { appendChild: child => appendedScripts.push(child) }
+  };
+  const context = { window, navigator: { onLine: options.online !== false }, document, Date, Map, URL };
   const source = ['checkin-gate.js', 'gift-queue.js', 'app.js'].map(file => fs.readFileSync(path.join(__dirname, '..', 'docs', file), 'utf8')).join('\n');
-  vm.runInNewContext(source + '\nthis.ui = { start: startScanner, stop: stopScanner, query: queryGuest, mutate: mutateGift, next: continueToNextGuest, render: renderGiftResult, save: saveSettings, sessionToken: readSessionToken, snapshot: typeof applyGuestSnapshot === "function" ? applyGuestSnapshot : null, searchSnapshot: typeof searchGuestSnapshot === "function" ? searchGuestSnapshot : null, queue: () => giftQueue, sync: kickGiftQueue, reloadQueue: loadGiftQueue };', context);
+  vm.runInNewContext(source + '\nthis.ui = { start: startScanner, stop: stopScanner, query: queryGuest, mutate: mutateGift, next: continueToNextGuest, render: renderGiftResult, save: saveSettings, sessionToken: readSessionToken, snapshot: typeof applyGuestSnapshot === "function" ? applyGuestSnapshot : null, searchSnapshot: typeof searchGuestSnapshot === "function" ? searchGuestSnapshot : null, queue: () => giftQueue, sync: kickGiftQueue, reloadQueue: loadGiftQueue, request: jsonpRequest };', context);
   nodes.get('#apiUrl').value = 'https://example.test/exec';
   nodes.get('#operator').value = '工作人員';
   const requests = [];
   const guest = { ok: true, status: 'GUEST_FOUND', guestId: 'G001', displayName: '測試賓客', tableNo: '3', giftState: '未收件', canCancel: false };
   context.jsonpRequest = async (settings, request) => { requests.push(request); return guest; };
-  return { context, nodes, requests, guest, ui: context.ui };
+  return { context, nodes, requests, guest, ui: context.ui, timeoutDelays, appendedScripts };
 }
 
 test('QR 查詢只送 guest；按下一位不新增紅包', async () => {
@@ -266,6 +273,17 @@ test('再次儲存並登入遇到一次 API 逾時時會自動重試並更新快
   assert.deepEqual(f.requests.map(request => request.action), ['session', 'session']);
   assert.equal(f.ui.sessionToken(), 'session-after-retry');
   assert.doesNotMatch(f.nodes.get('#resultBox').innerHTML || '', /無法建立工作階段/);
+});
+
+test('JSONP API 單次等待上限為 20 秒', async () => {
+  const f = loadUi();
+  const response = f.ui.request({ apiUrl: 'https://example.test/exec' }, { action: 'session' });
+  const script = f.appendedScripts[0];
+  const callbackName = new URL(script.src).searchParams.get('callback');
+
+  assert.equal(f.timeoutDelays[f.timeoutDelays.length - 1], 20000);
+  f.context.window[callbackName]({ ok: true });
+  await response;
 });
 
 test('已登入快照讓賓客查詢立即顯示，不等待 Apps Script 往返', async () => {

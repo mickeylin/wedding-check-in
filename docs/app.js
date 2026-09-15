@@ -6,6 +6,7 @@ const GUEST_SNAPSHOT_STORAGE_KEY = 'wedding-check-in-guest-snapshot';
 const GIFT_QUEUE_STORAGE_KEY = 'wedding-check-in-gift-queue-v1';
 const DUPLICATE_SCAN_COOLDOWN_MS = 2500;
 const GIFT_QUEUE_RETRY_DELAYS_MS = [3000, 10000, 30000];
+const API_REQUEST_TIMEOUT_MS = 20000;
 
 const elements = {
   apiUrl: document.querySelector('#apiUrl'),
@@ -388,7 +389,7 @@ function jsonpRequest(settings, params) {
     const timeoutId = window.setTimeout(() => {
       cleanup();
       reject(new Error('API 回應逾時'));
-    }, 12000);
+    }, API_REQUEST_TIMEOUT_MS);
 
     window[callbackName] = data => {
       // Timing only: no PIN, token, guest identity or amounts in diagnostics.
