@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 function loadCodeGs(overrides = {}) {
   const codePath = path.join(__dirname, '..', 'Code.gs');
-  const code = `${fs.readFileSync(codePath, 'utf8')}\nthis.__testExports = { createCheckInModule_, createGuestLookupModule_, handleApiSession_, verifySessionToken_, lookupCategoriesForFilter_ };`;
+  const code = `${fs.readFileSync(codePath, 'utf8')}\nthis.__testExports = { createGuestLookupModule_, handleApiSession_, verifySessionToken_, lookupCategoriesForFilter_ };`;
   const context = { ...overrides };
   vm.runInNewContext(code, context, { filename: codePath });
   return context.__testExports;
@@ -18,28 +18,13 @@ function createInMemoryDependencies() {
       guestId: 'G001',
       displayName: '王小明',
       tableNo: '8',
-      expectedCount: 2,
-      actualCount: 0,
-      status: '',
-      category: '男方朋友',
-      checkedInAt: null,
-      operator: ''
+      category: '男方朋友'
     }]
   ]);
-  const scanLogs = [];
 
   return {
     guests,
-    scanLogs,
-    lock: {
-      runExclusive(callback) {
-        return callback();
-      }
-    },
     guestStore: {
-      findById(guestId) {
-        return guests.get(guestId) || null;
-      },
       search(query, category) {
         const normalizedQuery = String(query || '').trim().toLowerCase();
         const normalizedCategory = String(category || '').trim().toLowerCase();
@@ -49,185 +34,11 @@ function createInMemoryDependencies() {
           const matchesCategory = !normalizedCategory || [guest.category, normalizedCategory === '男方朋友' || normalizedCategory === '女方朋友' ? '共同朋友' : ''].some(value => value.toLowerCase() === normalizedCategory);
           return matchesQuery && matchesCategory;
         });
-      },
-      markCheckedIn(guestId, update) {
-        const guest = guests.get(guestId);
-        Object.assign(guest, update);
       }
-    },
-    scanLog: {
-      record(entry) {
-        scanLogs.push(entry);
-      }
-    },
-    clock: () => new Date('2026-08-13T10:30:00.000Z'),
-    formatDate: value => new Date(value).toISOString()
+    }
   };
 }
 
-test('有效賓客第一次報到會更新 Guests 並回傳 CHECKED_IN', () => {
-  const { createCheckInModule_ } = loadCodeGs();
-  const dependencies = createInMemoryDependencies();
-  const checkIn = createCheckInModule_(dependencies);
-
-  const result = checkIn.attempt({
-    guestId: 'G001',
-    operator: 'staff-a',
-    station: '入口A',
-    requestId: 'req-001'
-  });
-
-  assert.equal(result.status, 'CHECKED_IN');
-  assert.equal(result.ok, true);
-  assert.equal(result.guestId, 'G001');
-  assert.equal(result.displayName, '王小明');
-  assert.equal(result.tableNo, '8');
-  assert.equal(dependencies.guests.get('G001').status, '已報到');
-  assert.equal(dependencies.guests.get('G001').actualCount, 2);
-  assert.equal(dependencies.guests.get('G001').operator, 'staff-a');
-});
-
-test('報到站台只記錄在 ScanLog，不寫入 Guests', () => {
-  const { createCheckInModule_ } = loadCodeGs();
-  const dependencies = createInMemoryDependencies();
-  dependencies.shouldLogSuccessCheckIns = () => true;
-  const checkIn = createCheckInModule_(dependencies);
-
-  const result = checkIn.attempt({
-    guestId: 'G001',
-    operator: 'staff-a',
-    station: '入口A',
-    requestId: 'req-station'
-  });
-
-  assert.equal(result.status, 'CHECKED_IN');
-  assert.equal(dependencies.guests.get('G001').station, undefined);
-  assert.equal(dependencies.scanLogs.length, 1);
-  assert.equal(dependencies.scanLogs[0].station, '入口A');
-});
-test('已報到賓客再次報到會回傳 ALREADY_CHECKED_IN 且保留原時間', () => {
-  const { createCheckInModule_ } = loadCodeGs();
-  const dependencies = createInMemoryDependencies();
-  const checkIn = createCheckInModule_(dependencies);
-
-  const first = checkIn.attempt({
-    guestId: 'G001',
-    operator: 'staff-a',
-    station: '入口A',
-    requestId: 'req-001'
-  });
-  const originalCheckedInAt = dependencies.guests.get('G001').checkedInAt;
-  const second = checkIn.attempt({
-    guestId: 'G001',
-    operator: 'staff-b',
-    station: '入口B',
-    requestId: 'req-002'
-  });
-
-  assert.equal(first.status, 'CHECKED_IN');
-  assert.equal(second.status, 'ALREADY_CHECKED_IN');
-  assert.equal(second.ok, true);
-  assert.match(second.message, /原報到時間/);
-  assert.equal(dependencies.guests.get('G001').checkedInAt, originalCheckedInAt);
-  assert.equal(dependencies.guests.get('G001').operator, 'staff-a');
-});
-
-test('找不到賓客時回傳 NOT_FOUND 且不寫入 Guests', () => {
-  const { createCheckInModule_ } = loadCodeGs();
-  const dependencies = createInMemoryDependencies();
-  const checkIn = createCheckInModule_(dependencies);
-
-  const result = checkIn.attempt({
-    guestId: 'G999',
-    operator: 'staff-a',
-    station: '入口A',
-    requestId: 'req-003'
-  });
-
-  assert.equal(result.status, 'NOT_FOUND');
-  assert.equal(result.ok, false);
-  assert.equal(dependencies.guests.has('G999'), false);
-});
-test('沒有賓客 ID 時回傳 EMPTY_SCAN 且不寫入 Guests', () => {
-  const { createCheckInModule_ } = loadCodeGs();
-  const dependencies = createInMemoryDependencies();
-  const checkIn = createCheckInModule_(dependencies);
-
-  const result = checkIn.attempt({
-    guestId: '',
-    operator: 'staff-a',
-    station: '入口A',
-    requestId: 'req-004'
-  });
-
-  assert.equal(result.status, 'EMPTY_SCAN');
-  assert.equal(result.ok, false);
-  assert.equal(dependencies.guests.get('G001').status, '');
-});
-test('取得 lock 超時時回傳 BUSY 且不寫入 Guests', () => {
-  const { createCheckInModule_ } = loadCodeGs();
-  const dependencies = createInMemoryDependencies();
-  const busyError = new Error('lock busy');
-  busyError.code = 'BUSY';
-  dependencies.lock = {
-    runExclusive() {
-      throw busyError;
-    }
-  };
-  const checkIn = createCheckInModule_(dependencies);
-
-  const result = checkIn.attempt({
-    guestId: 'G001',
-    operator: 'staff-a',
-    station: '入口A',
-    requestId: 'req-005'
-  });
-
-  assert.equal(result.status, 'BUSY');
-  assert.equal(result.ok, false);
-  assert.equal(dependencies.guests.get('G001').status, '');
-  assert.equal(dependencies.scanLogs.length, 0);
-});
-test('找不到賓客時會記錄 NOT_FOUND ScanLog', () => {
-  const { createCheckInModule_ } = loadCodeGs();
-  const dependencies = createInMemoryDependencies();
-  const checkIn = createCheckInModule_(dependencies);
-
-  checkIn.attempt({
-    guestId: 'G999',
-    operator: 'staff-a',
-    station: '入口A',
-    requestId: 'req-006'
-  });
-
-  assert.equal(dependencies.scanLogs.length, 1);
-  assert.equal(dependencies.scanLogs[0].status, 'NOT_FOUND');
-  assert.equal(dependencies.scanLogs[0].requestId, 'req-006');
-});
-test('Guests 寫入成功但 ScanLog 失敗時仍回傳 CHECKED_IN', () => {
-  const { createCheckInModule_ } = loadCodeGs();
-  const dependencies = createInMemoryDependencies();
-  dependencies.shouldLogSuccessCheckIns = () => true;
-  dependencies.scanLog = {
-    record() {
-      throw new Error('scan log unavailable');
-    }
-  };
-  const checkIn = createCheckInModule_(dependencies);
-
-  const result = checkIn.attempt({
-    guestId: 'G001',
-    operator: 'staff-a',
-    station: '入口A',
-    requestId: 'req-007'
-  });
-
-  assert.equal(result.status, 'CHECKED_IN');
-  assert.equal(result.ok, true);
-  assert.equal(result.warnings.length, 1);
-  assert.equal(result.warnings[0], 'SCAN_LOG_FAILED');
-  assert.equal(dependencies.guests.get('G001').status, '已報到');
-});
 test('查找會回傳桌號與關係分類', () => {
   const { createGuestLookupModule_ } = loadCodeGs();
   const dependencies = createInMemoryDependencies();
@@ -368,27 +179,4 @@ test("expired session tokens are rejected and removed", () => {
     error => error.code === "UNAUTHORIZED"
   );
   assert.equal(properties.has("CHECKIN_SESSION_expired-token"), false);
-});
-test("unexpected core failures are logged as ERROR", () => {
-  const { createCheckInModule_ } = loadCodeGs();
-  const dependencies = createInMemoryDependencies();
-  dependencies.lock = {
-    runExclusive() {
-      throw new Error("sheet unavailable");
-    }
-  };
-  const checkIn = createCheckInModule_(dependencies);
-
-  const result = checkIn.attempt({
-    guestId: "G001",
-    operator: "staff-a",
-    station: "入口A",
-    requestId: "req-008"
-  });
-
-  assert.equal(result.status, "ERROR");
-  assert.equal(result.ok, false);
-  assert.equal(dependencies.scanLogs.length, 1);
-  assert.equal(dependencies.scanLogs[0].status, "ERROR");
-  assert.equal(dependencies.guests.get("G001").status, "");
 });

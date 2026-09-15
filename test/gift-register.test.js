@@ -119,11 +119,16 @@ test('人工多包不被一般收件覆蓋，也不提供模糊撤銷', () => {
 // A minimal Sheets double runs production migration and edit-trigger adapters.
 function sheetDouble(name, data) {
   const sheet = { data, getName: () => name, getLastRow: () => data.length,
+    copyTo(ss) { const copy = sheetDouble(name, structuredClone(data)); ss.archives.push(copy); return copy; },
+    setName(value) { name = value; return sheet; },
+    hideSheet() { sheet.hidden = true; return sheet; },
     getLastColumn: () => Math.max(...data.map(row => row.length), 0),
     appendRow: row => data.push(row), getDataRange: () => sheet.getRange(1, 1, data.length, sheet.getLastColumn()),
     getRange(r, c, rows = 1, cols = 1) {
       return { getValues: () => Array.from({ length: rows }, (_, y) => Array.from({ length: cols }, (_, x) => data[r - 1 + y]?.[c - 1 + x] ?? '')),
         setValues(values) { values.forEach((row, y) => row.forEach((value, x) => { data[r - 1 + y] ||= []; data[r - 1 + y][c - 1 + x] = value; })); },
+        clearContent() { this.setValues(Array.from({ length: rows }, () => Array(cols).fill(''))); },
+        clearFormat() {},
         setValue(value) { this.setValues([[value]]); }, getSheet: () => sheet,
         getRow: () => r, getLastRow: () => r + rows - 1, getNumRows: () => rows, getNumColumns: () => cols,
         getA1Notation: () => `R${r}C${c}` };
@@ -157,13 +162,40 @@ test('不完整清點改回待清點；批次紀錄明確標示缺少舊值', ()
 test('賓客 schema 補欄、調整順序時保留自訂資料；重跑不變', () => {
   const sheet = sheetDouble('Guests', [['顯示姓名', '自訂欄', '賓客ID'], ['賓客', '保留內容', 'G007']]);
   const api = load();
-  const ss = { getSheetByName: () => sheet };
+  const ss = { archives: [], getSheetByName: name => name === 'Guests' ? sheet : null };
   api.ensureGuestSheet_(ss);
   assert.equal(sheet.data[1][0], 'G007');
-  assert.equal(sheet.data[1][10], '保留內容');
+  assert.equal(sheet.data[1][5], '保留內容');
+  assert.equal(ss.archives.length, 1);
   const previous = JSON.stringify(sheet.data);
   api.ensureGuestSheet_(ss);
   assert.equal(JSON.stringify(sheet.data), previous);
+  assert.equal(ss.archives.length, 1);
+});
+
+test('舊報到欄位先完整封存，再保留五欄主檔與自訂欄位', () => {
+  const original = [
+    ['賓客ID', '顯示姓名', '新郎/新娘方', '桌號', '預計人數', '實到人數', '報到狀態', '操作人員', '報到時間', '備註', '自訂欄'],
+    ['g001', '賓客', '男方朋友', '5', 2, 2, '已報到', '甲', '舊時間', '素食', '保留']
+  ];
+  const sheet = sheetDouble('Guests', structuredClone(original));
+  const ss = { archives: [], getSheetByName: name => name === 'Guests' ? sheet : null };
+  const api = load();
+  api.ensureGuestSheet_(ss);
+  assert.deepEqual(ss.archives[0].data, original);
+  assert.equal(ss.archives[0].hidden, true);
+  assert.deepEqual(sheet.data[1].slice(0, 6), ['g001', '賓客', '男方朋友', '5', '素食', '保留']);
+  assert.ok(sheet.data[0].slice(6).every(value => value === ''));
+  api.ensureGuestSheet_(ss);
+  assert.equal(ss.archives.length, 1);
+});
+
+test('主檔備份失敗時停止遷移，原始內容不變', () => {
+  const sheet = sheetDouble('Guests', [['顯示姓名', '賓客ID'], ['賓客', 'g001']]);
+  const before = structuredClone(sheet.data);
+  sheet.copyTo = () => { throw new Error('backup failed'); };
+  assert.throws(() => load().ensureGuestSheet_({ getSheetByName: () => sheet }), /backup failed/);
+  assert.deepEqual(sheet.data, before);
 });
 
 test('正式 API adapter 每次只讀取兩表各一次；查詢零鎖零 flush，收件仍鎖內重讀', () => {

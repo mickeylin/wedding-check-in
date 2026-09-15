@@ -1,27 +1,5 @@
-const GUEST_HEADERS = [
-  '賓客ID',
-  '顯示姓名',
-  '新郎/新娘方',
-  '桌號',
-  '預計人數',
-  '實到人數',
-  '報到狀態',
-  '操作人員',
-  '報到時間',
-  '備註'
-];
-
-const SCAN_LOG_HEADERS = [
-  '掃描時間',
-  '站台',
-  '掃描內容',
-  '處理結果',
-  '賓客ID',
-  '顯示姓名',
-  '桌號',
-  '訊息',
-  '操作人員'
-];
+const GUEST_HEADERS = ['賓客ID', '顯示姓名', '新郎/新娘方', '桌號', '備註'];
+const LEGACY_GUEST_HEADERS = ['預計人數', '實到人數', '報到狀態', '操作人員', '報到時間'];
 
 const API_STATION_NAME = 'GitHubPages';
 const SESSION_TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
@@ -36,37 +14,26 @@ const GUEST_COL = columnMap_(GUEST_HEADERS);
 function setupSheet() {
   const ss = getSpreadsheet_();
   const guestSheet = ensureGuestSheet_(ss);
-  const scanLogSheet = ensureSheet_(ss, 'ScanLog', SCAN_LOG_HEADERS);
-
   guestSheet.setFrozenRows(1);
-  guestSheet.getRange('E:F').setNumberFormat('0');
-  guestSheet.getRange('I:I').setNumberFormat('yyyy/mm/dd hh:mm:ss');
   guestSheet.autoResizeColumns(1, GUEST_HEADERS.length);
-
-  scanLogSheet.setFrozenRows(1);
-  scanLogSheet.getRange('A:A').setNumberFormat('yyyy/mm/dd hh:mm:ss');
-  scanLogSheet.autoResizeColumns(1, SCAN_LOG_HEADERS.length);
-
+  ['ScanLog', 'Dashboard'].forEach(name => {
+    const legacy = ss.getSheetByName(name);
+    if (legacy) {
+      legacy.setName(uniqueArchiveName_(ss, name));
+      legacy.hideSheet();
+    }
+  });
   setupGiftRegister_(ss);
 
   return '數位禮金簿初始化完成；請另執行 installGiftEditTrigger';
 }
 
-function setupDashboard_(ss) {
-  const sheet = ss.getSheetByName('Dashboard') || ss.insertSheet('Dashboard');
-  sheet.clear();
-  sheet.getRange(1, 1, 8, 2).setValues([
-    ['項目', '數值'],
-    ['總組數', '=COUNTA(Guests!B2:B)'],
-    ['已報到組數', '=COUNTIF(Guests!G2:G,"已報到")'],
-    ['未報到組數', '=COUNTIFS(Guests!B2:B,"<>",Guests!G2:G,"<>已報到")'],
-    ['總預計人數', '=SUM(Guests!E2:E)'],
-    ['實到人數', '=SUM(Guests!F2:F)'],
-    ['重複掃描次數', '=COUNTIF(ScanLog!D2:D,"ALREADY_CHECKED_IN")'],
-    ['找不到 QR 次數', '=COUNTIF(ScanLog!D2:D,"NOT_FOUND")']
-  ]);
-  sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, 2);
+function uniqueArchiveName_(ss, name) {
+  const base = name + '_Archive_' + Date.now();
+  let candidate = base;
+  let suffix = 1;
+  while (ss.getSheetByName(candidate)) candidate = base + '_' + suffix++;
+  return candidate;
 }
 
 /**
@@ -155,27 +122,6 @@ function doGet(e) {
     : jsonResponse_(body);
 }
 
-function findGuestById_(ss, guestId) {
-  const sheet = getRequiredSheet_(ss, 'Guests');
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return null;
-
-  const guestIdRange = sheet.getRange(2, GUEST_COL['賓客ID'] + 1, lastRow - 1, 1);
-  const found = guestIdRange
-    .createTextFinder(guestId)
-    .matchEntireCell(true)
-    .findNext();
-
-  if (!found) return null;
-
-  const rowNumber = found.getRow();
-  return {
-    sheet,
-    rowNumber,
-    row: sheet.getRange(rowNumber, 1, 1, GUEST_HEADERS.length).getValues()[0]
-  };
-}
-
 function columnMap_(headers) {
   const map = {};
   headers.forEach((header, index) => {
@@ -203,24 +149,33 @@ function ensureGuestSheet_(ss) {
   }
 
   const existingMap = columnMap_(existingHeaders);
+  const namedHeaders = existingHeaders.filter(Boolean);
+  if (new Set(namedHeaders).size !== namedHeaders.length) {
+    throw new Error('Guests 欄位名稱重複，請先整理標題再升級');
+  }
   const missingHeaders = ['賓客ID', '顯示姓名'].filter(header => existingMap[header] === undefined);
   if (missingHeaders.length) {
     throw new Error('Guests 缺少必要欄位：' + missingHeaders.join('、'));
   }
 
   const isCanonical = GUEST_HEADERS.every((header, index) => existingHeaders[index] === header);
-  if (isCanonical) return sheet;
+  const hasLegacy = existingHeaders.some(header => LEGACY_GUEST_HEADERS.includes(header));
+  if (isCanonical && !hasLegacy) return sheet;
 
   const rows = lastRow > 1
     ? sheet.getRange(2, 1, lastRow - 1, lastColumn).getValues()
     : [];
   // Preserve custom columns and their contents during canonical schema migration.
   const extras = existingHeaders.map((header, index) => ({ header, index }))
-    .filter(item => GUEST_HEADERS.indexOf(item.header) === -1);
+    .filter(item => GUEST_HEADERS.indexOf(item.header) === -1 && !LEGACY_GUEST_HEADERS.includes(item.header));
   const migratedHeaders = GUEST_HEADERS.concat(extras.map(item => item.header));
   const migratedRows = rows.map(row => GUEST_HEADERS.map(header => existingMap[header] === undefined ? '' : row[existingMap[header]])
     .concat(extras.map(item => row[item.index])));
 
+  // Preserve a full recoverable copy before moving or removing any existing columns.
+  sheet.copyTo(ss).setName(uniqueArchiveName_(ss, 'Guests')).hideSheet();
+  sheet.getRange(1, 1, lastRow, lastColumn).clearContent();
+  sheet.getRange(1, 1, lastRow, lastColumn).clearFormat();
   sheet.getRange(1, 1, 1, migratedHeaders.length).setValues([migratedHeaders]);
   if (migratedRows.length) {
     sheet.getRange(2, 1, migratedRows.length, migratedHeaders.length).setValues(migratedRows);
@@ -240,25 +195,6 @@ function getSpreadsheet_() {
     throw new Error('找不到綁定的 Google Sheet，請設定 SPREADSHEET_ID');
   }
   return SpreadsheetApp.openById(spreadsheetId);
-}
-
-function ensureSheet_(ss, name, headers) {
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) sheet = ss.insertSheet(name);
-
-  const existing = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
-  const isEmpty = existing.every(value => !String(value).trim());
-
-  if (isEmpty) {
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  } else {
-    headers.forEach((header, index) => {
-      if (existing[index] !== header) {
-        sheet.getRange(1, index + 1).setValue(header);
-      }
-    });
-  }
-  return sheet;
 }
 
 function getRequiredSheet_(ss, name) {
@@ -285,10 +221,6 @@ function headerMap_(headerRow, expectedHeaders) {
 
 function createGoogleSheetsGuestStore_(ss) {
   return {
-    findById(guestId) {
-      const found = findGuestById_(ss, guestId);
-      return found ? guestRecordFromRow_(found.row) : null;
-    },
     search(query, category) {
       const sheet = getRequiredSheet_(ss, 'Guests');
       const lastRow = sheet.getLastRow();
@@ -317,20 +249,6 @@ function createGoogleSheetsGuestStore_(ss) {
             - lookupMatchRank_(right, normalizedQuery);
           return rankDifference || left.displayName.localeCompare(right.displayName);
         });
-    },
-    markCheckedIn(guestId, update) {
-      const found = findGuestById_(ss, guestId);
-      if (!found) {
-        throw apiError_('NOT_FOUND', '找不到要更新的賓客');
-      }
-      found.sheet
-        .getRange(found.rowNumber, GUEST_COL['實到人數'] + 1, 1, 4)
-        .setValues([[
-          Number(update.actualCount) || 1,
-          update.status,
-          update.operator || '',
-          update.checkedInAt
-        ]]);
     }
   };
 }
@@ -341,11 +259,7 @@ function guestRecordFromRow_(row) {
     displayName: String(row[GUEST_COL['顯示姓名']] || '').trim(),
     category: String(row[GUEST_COL['新郎/新娘方']] || '').trim(),
     tableNo: String(row[GUEST_COL['桌號']] || '').trim(),
-    expectedCount: Number(row[GUEST_COL['預計人數']] || 0),
-    actualCount: Number(row[GUEST_COL['實到人數']] || 0),
-    status: String(row[GUEST_COL['報到狀態']] || '').trim(),
-    checkedInAt: row[GUEST_COL['報到時間']] || null,
-    operator: String(row[GUEST_COL['操作人員']] || '').trim()
+    notes: String(row[GUEST_COL['備註']] || '').trim()
   };
 }
 
@@ -356,25 +270,6 @@ function lookupMatchRank_(guest, query) {
   if (name.startsWith(query)) return 1;
   if (normalizeLookupText_(guest.guestId) === query) return 1;
   return 2;
-}
-
-function createGoogleSheetsScanLog_(ss) {
-  return {
-    record(entry) {
-      const sheet = getRequiredSheet_(ss, 'ScanLog');
-      sheet.appendRow([
-        entry.recordedAt,
-        entry.station || '',
-        entry.rawScan || entry.guestId || '',
-        entry.status,
-        entry.guestId || '',
-        entry.displayName || '',
-        entry.tableNo || '',
-        entry.message || '',
-        entry.operator || ''
-      ]);
-    }
-  };
 }
 
 function createScriptLock_(timeoutMs) {
@@ -394,17 +289,6 @@ function createScriptLock_(timeoutMs) {
       }
     }
   };
-}
-
-function createProductionCheckInModule_(ss) {
-  return createCheckInModule_({
-    guestStore: createGoogleSheetsGuestStore_(ss),
-    scanLog: createGoogleSheetsScanLog_(ss),
-    lock: createScriptLock_(5000),
-    clock: () => new Date(),
-    formatDate: formatDate_,
-    shouldLogSuccessCheckIns: () => shouldAppendScanLog_('CHECKED_IN')
-  });
 }
 
 function parseApiPayload_(e) {
@@ -474,29 +358,6 @@ function errorResponse_(err, now) {
     processedAt: formatDate_(now),
     retryable: status === 'BUSY'
   };
-}
-
-function handleApiCheckin_(payload, now) {
-  if (payload.action !== 'checkin') {
-    throw apiError_('BAD_REQUEST', '不支援的 API action');
-  }
-
-  const session = verifySessionToken_(payload.sessionToken, now);
-  const ss = getSpreadsheet_();
-  const module = createProductionCheckInModule_(ss);
-  const result = module.attempt({
-    guestId: extractGuestId_(payload.guestId),
-    rawScan: payload.guestId,
-    operator: session.operator,
-    station: session.station,
-    requestId: payload.requestId || '',
-    observedAt: now
-  });
-
-  return Object.assign({}, result, {
-    processedAt: formatDate_(now),
-    requestId: payload.requestId || ''
-  });
 }
 
 function handleApiLookup_(payload, now) {
@@ -634,12 +495,6 @@ function verifyApiPin_(pin) {
   }
 }
 
-function shouldAppendScanLog_(status) {
-  if (status !== 'CHECKED_IN') return true;
-  const value = PropertiesService.getScriptProperties().getProperty('LOG_SUCCESS_CHECKINS');
-  return ['true', 'yes', '1', 'y'].includes(String(value || '').trim().toLowerCase());
-}
-
 function normalizeLookupText_(value) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, '');
 }
@@ -735,9 +590,7 @@ function createGuestLookupModule_(dependencies) {
         displayName: guest.displayName,
         category: guest.category,
         tableNo: guest.tableNo,
-        expectedCount: guest.expectedCount,
-        checkInStatus: guest.status,
-        checkedInAt: guest.checkedInAt
+        notes: guest.notes || ''
       }));
       return {
         ok: true,
@@ -750,146 +603,4 @@ function createGuestLookupModule_(dependencies) {
       };
     }
   };
-}
-function createCheckInModule_(dependencies) {
-  const guestStore = dependencies.guestStore;
-  const lock = dependencies.lock;
-  const clock = dependencies.clock || (() => new Date());
-  const formatDate = dependencies.formatDate || formatDate_;
-  const scanLog = dependencies.scanLog || { record() {} };
-  const shouldLogSuccessCheckIns = dependencies.shouldLogSuccessCheckIns || (() => false);
-
-  return {
-    attempt(request) {
-      const input = request || {};
-      const guestId = String(input.guestId || '').trim();
-
-      if (!guestId) {
-        const emptyResult = {
-          ok: false,
-          status: 'EMPTY_SCAN',
-          guestId: '',
-          displayName: '',
-          tableNo: '',
-          message: '沒有掃描內容'
-        };
-        return recordCheckInResult_(
-          emptyResult,
-          input,
-          scanLog,
-          shouldLogSuccessCheckIns
-        );
-      }
-
-      try {
-        const result = lock.runExclusive(() => {
-          const guest = guestStore.findById(guestId);
-          if (!guest) {
-            return {
-              ok: false,
-              status: 'NOT_FOUND',
-              guestId,
-              displayName: '',
-              tableNo: '',
-              message: '找不到賓客 ID：' + guestId
-            };
-          }
-
-          if (guest.status === '已報到') {
-            return {
-              ok: true,
-              status: 'ALREADY_CHECKED_IN',
-              guestId: guest.guestId,
-              displayName: guest.displayName,
-              tableNo: guest.tableNo,
-              checkedInAt: guest.checkedInAt ? formatDate(guest.checkedInAt) : '',
-              message: guest.checkedInAt
-                ? '已報到，原報到時間：' + formatDate(guest.checkedInAt)
-                : '已報到'
-            };
-          }
-
-          const actualCount = guest.actualCount || guest.expectedCount || 1;
-          const checkedInAt = clock();
-          guestStore.markCheckedIn(guestId, {
-            actualCount,
-            status: '已報到',
-            checkedInAt,
-            operator: input.operator || ''
-          });
-
-          return {
-            ok: true,
-            status: 'CHECKED_IN',
-            guestId: guest.guestId,
-            displayName: guest.displayName,
-            tableNo: guest.tableNo,
-            actualCount,
-            checkedInAt: formatDate(checkedInAt),
-            message: '報到成功'
-          };
-        });
-
-        return recordCheckInResult_(
-          result,
-          input,
-          scanLog,
-          shouldLogSuccessCheckIns
-        );
-      } catch (err) {
-        if (err && err.code === 'BUSY') {
-          return {
-            ok: false,
-            status: 'BUSY',
-            guestId,
-            displayName: '',
-            tableNo: '',
-            message: '系統忙碌，請稍後再試'
-          };
-        }
-
-        const errorResult = {
-          ok: false,
-          status: 'ERROR',
-          guestId,
-          displayName: '',
-          tableNo: '',
-          message: err && err.message ? err.message : String(err)
-        };
-        return recordCheckInResult_(
-          errorResult,
-          input,
-          scanLog,
-          shouldLogSuccessCheckIns
-        );
-      }
-    }
-  };
-}
-
-function recordCheckInResult_(result, request, scanLog, shouldLogSuccessCheckIns) {
-  try {
-    if (result.status === 'CHECKED_IN' && !shouldLogSuccessCheckIns()) {
-      return result;
-    }
-
-    scanLog.record({
-      requestId: request.requestId || '',
-      rawScan: request.rawScan || request.guestId || '',
-      guestId: result.guestId,
-      status: result.status,
-      displayName: result.displayName,
-      tableNo: result.tableNo,
-      message: result.message,
-      operator: request.operator || '',
-      station: request.station || '',
-      recordedAt: request.observedAt || new Date()
-    });
-    return result;
-  } catch (err) {
-    return Object.assign({}, result, {
-      warnings: ['SCAN_LOG_FAILED'],
-      warning: err && err.message ? err.message : String(err)
-    });
-  }
 }

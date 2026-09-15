@@ -49,7 +49,7 @@ test('QR 查詢只送 guest；按下一位不新增紅包', async () => {
   assert.equal(f.requests.length, 1);
   assert.equal(f.requests[0].action, 'guest');
   assert.equal(f.nodes.get('#receiveButton').hidden, false);
-  assert.match(f.nodes.get('#checkinModalMessage').textContent, /桌號：3/);
+  assert.equal(f.nodes.get('#guestTable').textContent, '3');
   await f.ui.next();
   assert.equal(f.requests.length, 1);
   assert.equal(f.nodes.get('#receiveButton').hidden, true);
@@ -217,6 +217,21 @@ test('儲存設定時立即建立 session，不把登入延遲留給第一筆查
   assert.equal(connected, true);
   assert.deepEqual(f.requests.map(request => request.action), ['session']);
   assert.equal(f.ui.sessionToken(), 'fresh-session');
+  assert.equal(f.nodes.get('#settingsPanel').open, false);
+  assert.match(f.nodes.get('#operatorStatus').textContent, /工作人員・已登入/);
+});
+
+test('賓客結果集中顯示，下一位解除背景限制且不留下舊結果', async () => {
+  const f = loadUi();
+  await f.ui.query('G001');
+  assert.equal(f.nodes.get('#guestCode').textContent, 'G001');
+  assert.equal(f.nodes.get('#guestFacts').hidden, false);
+  assert.equal(f.nodes.get('#resultBox').hidden, true);
+  assert.equal(f.nodes.get('main').inert, true);
+  assert.equal(f.nodes.get('#nextGuestButton').textContent, '只查桌號／下一位');
+  await f.ui.next();
+  assert.equal(f.nodes.get('main').inert, false);
+  assert.equal(f.nodes.get('#checkinModal').hidden, true);
 });
 
 test('同一頁再次儲存並登入仍會重建 session 與賓客快照', async () => {
@@ -298,7 +313,7 @@ test('已登入快照讓賓客查詢立即顯示，不等待 Apps Script 往返'
   await f.ui.query('g001');
 
   assert.equal(f.nodes.get('#checkinModal').hidden, false);
-  assert.match(f.nodes.get('#checkinModalMessage').textContent, /桌號：3/);
+  assert.equal(f.nodes.get('#guestTable').textContent, '3');
   assert.equal(f.requests.length, 0, '顯示賓客不應等待遠端請求');
   assert.match(f.nodes.get('#timingStatus').textContent, /本機快照/);
 });

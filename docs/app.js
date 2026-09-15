@@ -9,6 +9,14 @@ const GIFT_QUEUE_RETRY_DELAYS_MS = [3000, 10000, 30000];
 const API_REQUEST_TIMEOUT_MS = 20000;
 
 const elements = {
+  settingsPanel: document.querySelector('#settingsPanel'),
+  settingsHint: document.querySelector('#settingsHint'),
+  operatorStatus: document.querySelector('#operatorStatus'),
+  reader: document.querySelector('#reader'),
+  guestFacts: document.querySelector('#guestFacts'),
+  guestTable: document.querySelector('#guestTable'),
+  guestCode: document.querySelector('#guestCode'),
+  queueDetails: document.querySelector('#queueDetails'),
   apiUrl: document.querySelector('#apiUrl'),
   pin: document.querySelector('#pin'),
 
@@ -68,20 +76,36 @@ let sessionPromise = null;
 const recentGuestIdScanAt = new Map();
 const checkinGate = window.CheckinGate.create();
 let shouldResumeScannerAfterGate = false;
+let guestReturnFocus = null;
 
 loadSettings();
 loadGiftQueue();
 loadGuestSnapshot();
 renderGiftQueue();
 updateConnectionStatus();
+elements.settingsPanel.open = !readSessionToken();
 scheduleGiftQueueSync(0);
 
 if (typeof window.addEventListener === 'function') {
   window.addEventListener('online', () => {
     renderGiftQueue();
+    updateConnectionStatus();
     scheduleGiftQueueSync(0);
   });
-  window.addEventListener('offline', renderGiftQueue);
+  window.addEventListener('offline', () => { renderGiftQueue(); updateConnectionStatus(); });
+  window.addEventListener('keydown', event => {
+    if (elements.checkinModal.hidden) return;
+    if (event.key === 'Escape') { event.preventDefault(); continueToNextGuest(); }
+    if (event.key !== 'Tab') return;
+    const targets = Array.from(elements.checkinModal.querySelectorAll('button:not([hidden]):not(:disabled), summary'));
+    if (!targets.length) return;
+    const index = targets.indexOf(document.activeElement);
+    if (event.shiftKey && index <= 0) {
+      event.preventDefault(); targets[targets.length - 1].focus();
+    } else if (!event.shiftKey && (index === -1 || index === targets.length - 1)) {
+      event.preventDefault(); targets[0].focus();
+    }
+  });
   window.addEventListener('storage', event => {
     if (event.key !== GIFT_QUEUE_STORAGE_KEY) return;
     loadGiftQueue();
@@ -128,6 +152,7 @@ async function startScanner() {
   if (!(await ensureSession())) return;
 
   try {
+    elements.reader.hidden = false;
     scanner = scanner || new Html5Qrcode('reader');
     await scanner.start(
       { facingMode: 'environment' },
@@ -139,6 +164,7 @@ async function startScanner() {
     elements.stopButton.disabled = false;
     showResult('掃描中', '請將 QR Code 對準鏡頭。', 'neutral');
   } catch (err) {
+    elements.reader.hidden = true;
     showResult('無法啟動相機', messageOf(err), 'error');
   }
 }
@@ -149,6 +175,7 @@ async function stopScanner() {
     await scanner.stop();
   } finally {
     isScanning = false;
+    elements.reader.hidden = true;
     elements.startButton.disabled = false;
     elements.stopButton.disabled = true;
   }
@@ -192,6 +219,7 @@ async function queryGuest(guestId, options = {}) {
   }
 
   recentGuestIdScanAt.set(guestId, now);
+  guestReturnFocus = document.activeElement;
   pruneRecentGuestIds(now);
   await loadGuest(guestId, operationStarted, sessionMs);
 }
@@ -334,6 +362,8 @@ function ensureSession() {
       window.sessionStorage.setItem(SESSION_OPERATOR_STORAGE_KEY, data.operator || settings.operator);
       if (Array.isArray(data.guests)) applyGuestSnapshot(data.guests);
       if (giftQueue.length) resumeGiftQueueAfterLogin();
+      elements.settingsPanel.open = false;
+      updateConnectionStatus();
       return true;
     })
     .catch(err => {
@@ -433,12 +463,17 @@ function handleUnauthorized(message) {
 }
 
 function openCheckinGate(title, message, tone) {
+  const wasOpen = !elements.checkinModal.hidden;
   checkinGate.complete();
   elements.checkinModalCard.className = 'checkin-modal-card ' + (tone || 'neutral');
   elements.checkinModalTitle.textContent = title;
   elements.checkinModalMessage.textContent = message || '';
   elements.checkinModal.hidden = false;
-  elements.nextGuestButton.focus();
+  elements.guestFacts.hidden = !selectedGuest;
+  document.querySelector('main').inert = true;
+  document.querySelector('header').inert = true;
+  document.body?.classList?.add('guest-open');
+  if (!wasOpen) elements.checkinModalTitle.focus();
 }
 
 function updateGiftButtons() {
@@ -447,6 +482,12 @@ function updateGiftButtons() {
   elements.receiveButton.disabled = giftBusy;
   elements.cancelReceiptButton.disabled = giftBusy;
   elements.nextGuestButton.disabled = giftBusy;
+  elements.nextGuestButton.textContent = selectedGuest && selectedGuest.giftState === '未收件'
+    ? '只查桌號／下一位' : '下一位';
+  if (!elements.checkinModal.hidden && [elements.receiveButton, elements.cancelReceiptButton]
+    .some(button => button.hidden && document.activeElement === button)) {
+    elements.nextGuestButton.focus();
+  }
 }
 
 function renderGiftResult(data) {
@@ -458,13 +499,15 @@ function renderGiftResult(data) {
     return;
   }
   selectedGuest = applyLocalGiftState(data);
-  const detail = ['賓客編號：' + selectedGuest.guestId, '桌號：' + (selectedGuest.tableNo || '尚未分配'),
-    '紅包：' + selectedGuest.giftState, selectedGuest.message || ''].join('\n');
+  elements.guestTable.textContent = selectedGuest.tableNo || '未分配';
+  elements.guestCode.textContent = selectedGuest.guestId;
+  const detail = ['紅包：' + selectedGuest.giftState,
+    selectedGuest.giftState === '未收件' ? '收到實體紅包後，請按「收到紅包」；只查桌號可直接下一位。' : selectedGuest.message || ''].join('\n');
   const tone = selectedGuest.giftState === '未收件' ? 'neutral'
     : selectedGuest.giftState === '待同步' ? 'warn'
       : selectedGuest.giftState === '待核對' ? 'error' : 'success';
   openCheckinGate(selectedGuest.displayName, detail, tone);
-  showResult(selectedGuest.displayName, detail, tone);
+  elements.resultBox.hidden = true;
   updateGiftButtons();
 }
 
@@ -613,6 +656,7 @@ function queueStatusLabel(item) {
 function renderGiftQueue() {
   if (!elements.giftQueueSummary || !elements.giftQueueList || !giftQueueModel) return;
   const summary = giftQueueModel.summary(giftQueue);
+  if (summary.attention || !giftQueueStorageAvailable) elements.queueDetails.open = true;
   const offlinePrefix = isBrowserOnline() ? '' : '目前離線；';
   if (!giftQueueStorageAvailable) {
     elements.giftQueueSummary.textContent = '手機儲存異常：不可安全收新紅包';
@@ -843,13 +887,17 @@ async function continueToNextGuest() {
   shouldResumeScannerAfterGate = false;
   elements.nextGuestButton.disabled = true;
   elements.checkinModal.hidden = true;
+  document.querySelector('main').inert = false;
+  document.querySelector('header').inert = false;
+  document.body?.classList?.remove('guest-open');
   checkinGate.reset();
 
   try {
     if (resumeScanner) {
       await startScanner();
+      elements.stopButton.focus();
     } else {
-      elements.manualGuestId.focus();
+      (guestReturnFocus && guestReturnFocus.isConnected ? guestReturnFocus : elements.manualGuestId).focus();
     }
   } finally {
     elements.nextGuestButton.disabled = false;
@@ -947,6 +995,7 @@ function getSettings() {
 }
 
 async function saveSettings() {
+  if (!validateSettings()) return false;
   const settings = getSettings();
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -1063,6 +1112,9 @@ function createRequestId() {
 }
 
 function updateConnectionStatus() {
+  const loggedIn = !!readSessionToken();
+  elements.operatorStatus.textContent = loggedIn ? readSessionOperator() + '・已登入' : '尚未登入';
+  elements.settingsHint.textContent = loggedIn ? '已登入・需要更新名單時展開' : '請登入下載名單';
   if (!giftQueueStorageAvailable) {
     elements.connectionStatus.textContent = '手機儲存異常';
     return;
@@ -1075,11 +1127,13 @@ function updateConnectionStatus() {
   } else if (summary.pending) {
     elements.connectionStatus.textContent = summary.pending + ' 筆待同步';
   } else {
-    elements.connectionStatus.textContent = elements.apiUrl.value.trim() ? 'API 已設定' : '未設定';
+    elements.connectionStatus.textContent = loggedIn ? '同步正常' : '尚未登入';
   }
 }
 
 function showResult(title, message, tone) {
+  elements.resultBox.hidden = false;
+  if (!readSessionToken()) elements.settingsPanel.open = true;
   elements.resultBox.className = `result-box ${tone || 'neutral'}`;
   elements.resultBox.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message || '')}</span>`;
 }

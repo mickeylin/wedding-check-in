@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>婚禮禮金簿</title>
-  <link rel="stylesheet" href="./styles.css?v=f691d25d1501">
+  <link rel="stylesheet" href="./styles.css?v=0c65474dce2d">
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
@@ -13,12 +13,13 @@
       <h1>婚禮禮金簿</h1>
       <p>查桌號・收到紅包後再登記</p>
     </div>
-    <div id="connectionStatus" class="status-pill">未設定</div>
+    <div class="header-status"><span id="operatorStatus"></span><a id="connectionStatus" class="status-pill" href="#syncTitle">未設定</a></div>
   </header>
 
   <main class="layout">
-    <section class="panel setup-panel" aria-labelledby="settingsTitle">
-      <h2 id="settingsTitle">設定</h2>
+    <details id="settingsPanel" class="panel setup-panel" open>
+      <summary id="settingsTitle">登入與設定 <span id="settingsHint">開始前請先登入</span></summary>
+      <p class="setup-help">網址與姓名會保留在這台裝置；重新開啟分頁時可能需要再次登入。更新名單也可在此操作。</p>
 
       <label for="apiUrl">Apps Script API URL</label>
       <input id="apiUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/.../exec">
@@ -28,24 +29,27 @@
       <label for="operator">操作人員</label>
       <input id="operator" type="text" placeholder="例如：小美">
 
-      <button id="saveSettingsButton" class="secondary-button" type="button">儲存並登入</button>
-    </section>
+      <button id="saveSettingsButton" class="secondary-button" type="button">登入並更新名單</button>
+    </details>
+    <div id="resultBox" class="result-box neutral" role="status" aria-live="polite">
+      <strong>準備接待</strong><span>先登入下載名單，即可掃描或查找賓客。</span>
+    </div>
 
     <section class="panel scanner-panel" aria-labelledby="scannerTitle">
       <div class="section-header">
-        <h2 id="scannerTitle">掃描</h2>
+        <h2 id="scannerTitle">掃 QR ／輸入編號</h2>
         <div class="button-row">
           <button id="startButton" type="button">開始掃描</button>
           <button id="stopButton" class="secondary-button" type="button" disabled>停止</button>
         </div>
       </div>
 
-      <div id="reader"></div>
+      <div id="reader" hidden></div>
 
       <form id="manualForm" class="manual-form">
-        <label for="manualGuestId">手動輸入賓客 ID</label>
+        <label for="manualGuestId">賓客編號</label>
         <div class="manual-row">
-          <input id="manualGuestId" type="text" autocomplete="off">
+          <input id="manualGuestId" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="例如 g001">
           <button type="submit">查詢</button>
         </div>
       </form>
@@ -54,8 +58,8 @@
     <section class="panel lookup-panel" aria-labelledby="lookupTitle">
       <div class="section-header">
         <div>
-          <h2 id="lookupTitle">沒有 QR？用分類查找</h2>
-          <p>選擇關係分類即可列出賓客；也可輸入姓名或稱呼縮小結果。</p>
+          <h2 id="lookupTitle">用姓名找賓客</h2>
+          <p>輸入姓名／稱呼，或直接選分類。</p>
         </div>
       </div>
 
@@ -83,17 +87,6 @@
       <div id="lookupResults" class="lookup-results" aria-live="polite"></div>
     </section>
 
-    <section class="panel result-panel" aria-labelledby="resultTitle">
-      <h2 id="resultTitle">結果</h2>
-      <div id="resultBox" class="result-box neutral" aria-live="polite">
-        <strong>等待掃描</strong>
-        <span>掃描只查詢；按「收到紅包」才登記收件。</span>
-      </div>
-
-      <h3>最近紀錄</h3>
-      <ol id="recentList" class="recent-list"></ol>
-    </section>
-
     <section class="panel sync-panel" aria-labelledby="syncTitle">
       <div class="section-header">
         <div>
@@ -103,9 +96,11 @@
         <button id="retryGiftQueueButton" class="secondary-button compact-button" type="button">立即重試</button>
       </div>
       <p class="sync-help">看到「已保存在手機」就能處理下一位；「已同步」才代表資料已進入 Google Sheet。</p>
-      <ol id="giftQueueList" class="sync-list" aria-live="polite"></ol>
+      <details id="queueDetails"><summary>查看同步紀錄</summary>
+      <ol id="giftQueueList" class="sync-list" aria-live="polite"></ol></details>
       <button id="clearCompletedGiftQueueButton" class="secondary-button" type="button" hidden>清除完成紀錄</button>
     </section>
+    <details class="panel history-panel"><summary>最近操作</summary><ol id="recentList" class="recent-list"></ol></details>
   </main>
 
   <div
@@ -117,21 +112,27 @@
     hidden
   >
     <div id="checkinModalCard" class="checkin-modal-card neutral">
-      <h2 id="checkinModalTitle">賓客資訊</h2>
+      <p class="eyebrow">目前賓客</p>
+      <h2 id="checkinModalTitle" tabindex="-1">賓客資訊</h2>
+      <div id="guestFacts" class="guest-facts" hidden>
+        <div><span>桌號</span><strong id="guestTable"></strong></div>
+        <div><span>紅包標記・賓客編號</span><strong id="guestCode"></strong></div>
+      </div>
       <p id="checkinModalMessage"></p>
+
+      <button id="receiveButton" type="button" hidden>收到紅包</button>
+      <button id="cancelReceiptButton" class="secondary-button" type="button" hidden>撤銷誤收件</button>
+      <button id="nextGuestButton" class="secondary-button" type="button">下一位</button>
       <details class="timing-details">
         <summary>查看本次耗時</summary>
         <p id="timingStatus">尚無量測資料</p>
       </details>
-      <button id="receiveButton" type="button" hidden>收到紅包</button>
-      <button id="cancelReceiptButton" class="secondary-button" type="button" hidden>撤銷誤收件</button>
-      <button id="nextGuestButton" type="button">下一位</button>
     </div>
   </div>
 
   <!-- Update the content-hash version when changing each local asset. -->
   <script src="./checkin-gate.js?v=5bdec7e233a6"></script>
   <script src="./gift-queue.js?v=610add030021"></script>
-  <script src="./app.js?v=aa29e55ae44a"></script>
+  <script src="./app.js?v=3df1b8fb478d"></script>
 </body>
 </html>

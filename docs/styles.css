@@ -63,7 +63,9 @@ p {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(260px, 360px) minmax(320px, 1fr) minmax(260px, 360px);
+  grid-template-columns: 1fr 1fr;
+  max-width: 1000px;
+  margin: auto;
   gap: 14px;
   padding: 14px;
 }
@@ -138,7 +140,7 @@ button:disabled {
 
 #reader {
   overflow: hidden;
-  min-height: 320px;
+  min-height: 240px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #111;
@@ -358,6 +360,8 @@ button:disabled {
   padding: 24px;
   background: var(--panel);
   box-shadow: 0 16px 40px rgb(0 0 0 / 22%);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
 }
 
 .checkin-modal-card h2 {
@@ -401,7 +405,7 @@ button:disabled {
   cursor: pointer;
   padding: 8px 0;
 }
-@media (max-width: 980px) {
+@media (max-width: 640px) {
   .layout {
     grid-template-columns: 1fr;
   }
@@ -416,4 +420,40 @@ button:disabled {
     align-items: stretch;
     flex-direction: column;
   }
+}
+
+[hidden] { display: none !important; }
+button, input, select { min-height: 46px; }
+input, select { min-width: 0; font-size: 16px; }
+button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visible {
+  outline: 3px solid #376b8b;
+  outline-offset: 3px;
+}
+.setup-panel, #resultBox, .sync-panel, .history-panel { grid-column: 1 / -1; }
+summary { cursor: pointer; font-weight: 700; padding: 6px 0; }
+#settingsHint { color: var(--muted); font-size: 13px; font-weight: normal; margin-left: 8px; }
+.setup-help { margin-top: 12px; font-size: 14px; line-height: 1.6; }
+#saveSettingsButton { margin-top: 16px; }
+.header-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.status-pill { text-decoration: none; }
+#resultBox { min-height: auto; }
+#resultBox strong { font-size: 16px; }
+.scanner-panel .section-header { margin-bottom: 12px; }
+.sync-panel .section-header h2 { margin-bottom: 6px; }
+.guest-facts { display: grid; grid-template-columns: 1fr 1.5fr; gap: 12px; margin: 18px 0; }
+.guest-facts > div { background: #ffffffb3; padding: 12px; border-radius: 8px; }
+.guest-facts span { display: block; font-size: 13px; color: var(--muted); }
+.guest-facts strong { display: block; font-size: 30px; overflow-wrap: anywhere; color: var(--ink); }
+.checkin-modal-card h2 { font-size: 28px; overflow-wrap: anywhere; }
+.eyebrow { font-size: 13px; margin-bottom: 6px !important; }
+.checkin-modal-card button { margin-top: 12px; }
+#cancelReceiptButton { background: transparent; color: var(--error-ink); border: 1px solid currentColor; }
+.timing-details { border-top: 1px solid var(--line); margin-top: 20px; }
+body.guest-open { overflow: hidden; }
+@media (max-width: 640px) {
+  .topbar { gap: 8px; padding: 14px 16px; }
+  h1 { font-size: 21px; }
+  .layout { padding: 10px; gap: 10px; }
+  .checkin-modal { padding: 10px; align-items: end; }
+  .checkin-modal-card { width: 100%; padding: 20px; max-height: calc(100dvh - 20px); }
 }
