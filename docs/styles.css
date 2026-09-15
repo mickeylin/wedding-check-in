@@ -213,6 +213,63 @@ button:disabled {
   border-bottom: 1px solid var(--line);
 }
 
+.compact-button {
+  width: auto;
+  min-width: 96px;
+}
+
+.sync-help {
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.sync-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sync-item {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px;
+  background: #fff;
+}
+
+.sync-item strong,
+.sync-item small {
+  display: block;
+}
+
+.sync-item small {
+  color: var(--muted);
+}
+
+.sync-item.pending {
+  background: var(--warn);
+  border-color: #e4ca76;
+}
+
+.sync-item.attention {
+  background: var(--error);
+  border-color: #e8adad;
+}
+
+.sync-item.synced {
+  background: var(--success);
+  border-color: #b5d8bf;
+}
+
+.sync-item button {
+  margin-top: 5px;
+  background: var(--button-soft);
+  color: var(--ink);
+}
+
 .lookup-form {
   display: grid;
   gap: 8px;

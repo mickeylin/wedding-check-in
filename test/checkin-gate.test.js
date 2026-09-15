@@ -27,7 +27,7 @@ test('報到完成前後的 gate 只允許按下一位後再開始下一次報�
   assert.equal(gate.state(), 'READY');
   assert.equal(gate.begin(), true);
 });
-test('前端設定移除站台且先載入 gate 再載入 app', () => {
+test('前端設定移除站台且先載入 gate 與 queue 再載入 app', () => {
   const htmlPath = path.join(__dirname, '..', 'docs', 'index.html');
   const appPath = path.join(__dirname, '..', 'docs', 'app.js');
   const html = fs.readFileSync(htmlPath, 'utf8');
@@ -36,6 +36,7 @@ test('前端設定移除站台且先載入 gate 再載入 app', () => {
   assert.equal(html.includes('id="station"'), false);
   assert.equal(app.includes('#station'), false);
   assert.ok(html.indexOf('./checkin-gate.js') < html.indexOf('./app.js'));
+  assert.ok(html.indexOf('./gift-queue.js') < html.indexOf('./app.js'));
   assert.ok(html.includes('id="checkinModal"'));
   assert.ok(html.includes('id="nextGuestButton"'));
 });

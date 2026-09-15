@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>婚禮禮金簿</title>
-  <link rel="stylesheet" href="./styles.css?v=644b1d8b3a01">
+  <link rel="stylesheet" href="./styles.css?v=f691d25d1501">
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
@@ -93,6 +93,19 @@
       <h3>最近紀錄</h3>
       <ol id="recentList" class="recent-list"></ol>
     </section>
+
+    <section class="panel sync-panel" aria-labelledby="syncTitle">
+      <div class="section-header">
+        <div>
+          <h2 id="syncTitle">紅包同步</h2>
+          <p id="giftQueueSummary" aria-live="polite">沒有待同步紀錄</p>
+        </div>
+        <button id="retryGiftQueueButton" class="secondary-button compact-button" type="button">立即重試</button>
+      </div>
+      <p class="sync-help">看到「已保存在手機」就能處理下一位；「已同步」才代表資料已進入 Google Sheet。</p>
+      <ol id="giftQueueList" class="sync-list" aria-live="polite"></ol>
+      <button id="clearCompletedGiftQueueButton" class="secondary-button" type="button" hidden>清除完成紀錄</button>
+    </section>
   </main>
 
   <div
@@ -118,6 +131,7 @@
 
   <!-- Update the content-hash version when changing each local asset. -->
   <script src="./checkin-gate.js?v=5bdec7e233a6"></script>
-  <script src="./app.js?v=1f478d7b17da"></script>
+  <script src="./gift-queue.js?v=610add030021"></script>
+  <script src="./app.js?v=f7561a68962f"></script>
 </body>
 </html>

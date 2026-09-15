@@ -4,7 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function loadUi() {
+function loadUi(options = {}) {
   const nodes = new Map();
   function node() {
     return { value: '', hidden: false, disabled: false, children: [],
@@ -12,12 +12,22 @@ function loadUi() {
       append(child) { this.children.push(child); },
       prepend(child) { this.children.unshift(child); }, replaceChildren() { this.children = []; } };
   }
-  const storage = new Map([['wedding-check-in-session-token', 'valid']]);
+  const storage = new Map([
+    ['wedding-check-in-session-token', 'valid'],
+    ['wedding-check-in-session-operator', options.sessionOperator || '工作人員']
+  ]);
+  const local = options.localStorage || new Map();
+  const localStorage = options.localStorageApi || {
+    getItem: key => local.get(key),
+    setItem: (key, value) => local.set(key, value),
+    removeItem: key => local.delete(key)
+  };
   const window = { sessionStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
-    localStorage: { getItem() {}, setItem() {} }, confirm: () => true, crypto: { randomUUID: () => 'request' } };
-  const context = { window, document: { querySelector: selector => { if (!nodes.has(selector)) nodes.set(selector, node()); return nodes.get(selector); }, createElement: node }, Date, Map, URL };
-  const source = ['checkin-gate.js', 'app.js'].map(file => fs.readFileSync(path.join(__dirname, '..', 'docs', file), 'utf8')).join('\n');
-  vm.runInNewContext(source + '\nthis.ui = { start: startScanner, stop: stopScanner, query: queryGuest, mutate: mutateGift, next: continueToNextGuest, render: renderGiftResult, save: saveSettings, sessionToken: readSessionToken, snapshot: typeof applyGuestSnapshot === "function" ? applyGuestSnapshot : null, searchSnapshot: typeof searchGuestSnapshot === "function" ? searchGuestSnapshot : null };', context);
+    localStorage, confirm: () => true, crypto: { randomUUID: () => 'request' },
+    setTimeout: () => 0, clearTimeout() {}, addEventListener() {} };
+  const context = { window, navigator: { onLine: options.online !== false }, document: { querySelector: selector => { if (!nodes.has(selector)) nodes.set(selector, node()); return nodes.get(selector); }, createElement: node }, Date, Map, URL };
+  const source = ['checkin-gate.js', 'gift-queue.js', 'app.js'].map(file => fs.readFileSync(path.join(__dirname, '..', 'docs', file), 'utf8')).join('\n');
+  vm.runInNewContext(source + '\nthis.ui = { start: startScanner, stop: stopScanner, query: queryGuest, mutate: mutateGift, next: continueToNextGuest, render: renderGiftResult, save: saveSettings, sessionToken: readSessionToken, snapshot: typeof applyGuestSnapshot === "function" ? applyGuestSnapshot : null, searchSnapshot: typeof searchGuestSnapshot === "function" ? searchGuestSnapshot : null, queue: () => giftQueue, sync: kickGiftQueue, reloadQueue: loadGiftQueue };', context);
   nodes.get('#apiUrl').value = 'https://example.test/exec';
   nodes.get('#operator').value = '工作人員';
   const requests = [];
@@ -55,16 +65,18 @@ test('掃描查詢不等待相機 stop，下一位重用串流且手動停止仍
   assert.equal(stops, 1);
 });
 
-test('收件提交中擋連點與下一位；成功後才顯示撤銷', async () => {
+test('收件先保存手機並立刻允許下一位；背景成功後才顯示撤銷', async () => {
   const f = loadUi();
   await f.ui.query('G001');
   let resolve;
   f.context.jsonpRequest = (settings, request) => { f.requests.push(request); return new Promise(done => { resolve = done; }); };
-  const pending = f.ui.mutate('receive');
+  await f.ui.mutate('receive');
+  const pending = f.ui.sync();
+  assert.equal(f.nodes.get('#nextGuestButton').disabled, false);
+  assert.match(f.nodes.get('#checkinModalMessage').textContent, /保存在這支手機/);
   await f.ui.mutate('receive');
   assert.equal(f.requests.filter(request => request.action === 'receive').length, 1);
-  assert.equal(f.nodes.get('#nextGuestButton').disabled, true);
-  assert.match(f.nodes.get('#checkinModalMessage').textContent, /G001/);
+  assert.equal(f.ui.queue()[0].status, 'syncing');
   resolve({ ...f.guest, status: 'RECEIVED', giftState: '待清點', receiptId: 'receipt', canCancel: true,
     serverMs: 1200, lockWaitMs: 20, authMs: 5, guestLookupMs: 3, giftReadMs: 300,
     giftWriteMs: 400, flushMs: 200 });
@@ -76,15 +88,91 @@ test('收件提交中擋連點與下一位；成功後才顯示撤銷', async ()
   assert.match(f.nodes.get('#timingStatus').textContent, /確認寫入/);
 });
 
-test('回應逾時隱藏寫入按鈕並要求核對，不自動重試', async () => {
+test('回應逾時保留本機紀錄，重試沿用相同請求編號', async () => {
   const f = loadUi();
   await f.ui.query('G001');
-  f.context.jsonpRequest = async () => { throw new Error('API 回應逾時'); };
+  f.context.jsonpRequest = async (settings, request) => {
+    f.requests.push(request);
+    if (f.requests.length === 2) throw new Error('API 回應逾時');
+    return { ...f.guest, status: 'REPLAY', giftState: '待清點', receiptId: 'receipt', canCancel: true };
+  };
   await f.ui.mutate('receive');
+  await f.ui.sync();
+  assert.equal(f.ui.queue()[0].status, 'retry_wait');
+  const firstRequestId = f.requests[1].requestId;
+  await f.ui.sync();
+  assert.equal(f.requests[2].requestId, firstRequestId);
+  assert.equal(f.ui.queue()[0].status, 'synced');
   assert.equal(f.nodes.get('#receiveButton').hidden, true);
-  assert.equal(f.nodes.get('#cancelReceiptButton').hidden, true);
-  assert.match(f.nodes.get('#checkinModalMessage').textContent, /可能已寫入/);
-  assert.equal(f.nodes.get('#nextGuestButton').disabled, false);
+  assert.equal(f.nodes.get('#cancelReceiptButton').hidden, false);
+});
+
+test('斷網收件不呼叫後端，重新載入後待同步紀錄仍存在', async () => {
+  const localStorage = new Map();
+  const f = loadUi({ online: false, localStorage });
+  await f.ui.query('G001');
+  const requestsBeforeReceive = f.requests.length;
+
+  await f.ui.mutate('receive');
+  await f.ui.sync();
+
+  assert.equal(f.requests.length, requestsBeforeReceive);
+  assert.equal(f.ui.queue()[0].status, 'queued');
+  assert.match(f.nodes.get('#giftQueueSummary').textContent, /尚未進入 Google Sheet/);
+
+  const reloaded = loadUi({ online: false, localStorage });
+  assert.equal(reloaded.ui.queue()[0].guestId, 'G001');
+  assert.equal(reloaded.ui.queue()[0].status, 'queued');
+});
+
+test('手機儲存失敗時不建立假收件，也不隱藏重新收件按鈕', async () => {
+  const f = loadUi({ localStorageApi: {
+    getItem() {}, removeItem() {}, setItem() { throw new Error('storage full'); }
+  } });
+  await f.ui.query('G001');
+
+  await f.ui.mutate('receive');
+
+  assert.equal(f.ui.queue().length, 0);
+  assert.equal(f.nodes.get('#receiveButton').hidden, false);
+  assert.match(f.nodes.get('#checkinModalMessage').textContent, /沒有安全記錄/);
+});
+
+test('另一支手機已先收件時轉為待核對，不把本機待辦當成同步成功', async () => {
+  const f = loadUi();
+  await f.ui.query('G001');
+  f.context.jsonpRequest = async (settings, request) => {
+    f.requests.push(request);
+    return { ...f.guest, status: 'ALREADY_RECEIVED', giftState: '待清點', receiptId: 'other-receipt', canCancel: false };
+  };
+
+  await f.ui.mutate('receive');
+  await f.ui.sync();
+
+  assert.equal(f.ui.queue()[0].status, 'attention');
+  assert.match(f.nodes.get('#checkinModalMessage').textContent, /待核對區/);
+  assert.match(f.nodes.get('#giftQueueSummary').textContent, /待核對/);
+});
+
+test('待同步紀錄不保存 PIN 或 token，且只允許原收件人員續傳', async () => {
+  const localStorage = new Map();
+  const first = loadUi({ online: false, localStorage });
+  first.nodes.get('#pin').value = 'secret-pin';
+  await first.ui.query('G001');
+  first.nodes.get('#operator').value = '只改畫面未重新登入';
+  await first.ui.mutate('receive');
+
+  const serialized = localStorage.get('wedding-check-in-gift-queue-v1');
+  assert.doesNotMatch(serialized, /secret-pin|valid/);
+  assert.match(serialized, /工作人員/);
+  assert.doesNotMatch(serialized, /只改畫面/);
+
+  const second = loadUi({ localStorage, sessionOperator: '另一位人員' });
+  second.nodes.get('#operator').value = '另一位人員';
+  await second.ui.sync();
+  assert.equal(second.ui.queue()[0].status, 'queued');
+  assert.match(second.nodes.get('#giftQueueSummary').textContent, /原收件人員/);
+  assert.equal(second.requests.length, 0);
 });
 
 test('撤銷帶入收件ID；後端已清點時不再允許操作', async () => {

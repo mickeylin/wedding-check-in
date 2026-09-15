@@ -8,6 +8,7 @@
 
 - QR／手動賓客編號只查詢；姓名／分類查找後可開啟相同賓客資訊。
 - 明確收件、待清點金額留白、後端鎖防止兩支手機重複收件。
+- 收件先安全保存在手機並立即繼續下一位；斷網或逾時時保留待同步佇列，恢復後沿用同一請求編號補送。
 - 手機撤銷未填金額的待清點收件，保留原收件與撤銷人員、時間；重新收件另建一列。
 - Google Sheet 的 Gifts、GiftAudit 與 GiftDashboard；清點欄位驗證、編輯觸發器與統計。
 - 原 Guests 與舊報到資料保留，不把舊報到狀態當成已收到紅包。
@@ -18,7 +19,7 @@
 
 - `Code.gs`：賓客查找、PIN/session、API 路由及既有資料相容邏輯。
 - `GiftRegister.gs`：禮金收件、撤銷、工作表初始化與編輯紀錄。
-- `docs/index.html`、`docs/app.js`、`docs/styles.css`：手機操作頁。
+- `docs/index.html`、`docs/app.js`、`docs/gift-queue.js`、`docs/styles.css`：手機操作頁與本機收件佇列。
 - `test/`：Node 原生測試，包含後端狀態、Sheet adapter 及前端互動測試。
 
 ## 部署摘要
@@ -36,6 +37,7 @@
 ```powershell
 node --test test/*.test.js
 node --check docs/app.js
+node --check docs/gift-queue.js
 ```
 
 舊版部署與 CSV 範例保留於[歷史報到說明](docs/legacy-checkin.md)，僅供參考，不能直接當成新版禮金簿操作流程。
