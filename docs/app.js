@@ -350,13 +350,25 @@ function ensureSession() {
   return sessionPromise;
 }
 
-function jsonpSession(settings) {
-  return jsonpRequest(settings, {
+async function jsonpSession(settings) {
+  const request = {
     action: 'session',
     pin: settings.pin,
     operator: settings.operator,
     includeGuestSnapshot: '1'
-  });
+  };
+
+  try {
+    return await jsonpRequest(settings, request);
+  } catch (err) {
+    if (!isRetryableSessionError(err)) throw err;
+    return jsonpRequest(settings, request);
+  }
+}
+
+function isRetryableSessionError(err) {
+  const message = messageOf(err);
+  return message === 'API 回應逾時' || message === 'API 載入失敗';
 }
 
 function jsonpGuest(settings, guestId, requestId) {

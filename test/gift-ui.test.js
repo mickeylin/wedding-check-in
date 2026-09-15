@@ -212,6 +212,62 @@ test('儲存設定時立即建立 session，不把登入延遲留給第一筆查
   assert.equal(f.ui.sessionToken(), 'fresh-session');
 });
 
+test('同一頁再次儲存並登入仍會重建 session 與賓客快照', async () => {
+  const f = loadUi();
+  f.nodes.get('#pin').value = 'test-pin';
+  let sessionNumber = 0;
+  f.context.jsonpRequest = async (settings, request) => {
+    f.requests.push(request);
+    sessionNumber += 1;
+    return { ok: true, status: 'SESSION_CREATED', sessionToken: 'session-' + sessionNumber,
+      operator: '工作人員', expiresAt: Date.now() + 10000, guests: [{ ...f.guest, guestId: 'G001' }] };
+  };
+
+  assert.equal(await f.ui.save(), true);
+  assert.equal(await f.ui.save(), true);
+  assert.deepEqual(f.requests.map(request => request.action), ['session', 'session']);
+  assert.equal(f.ui.sessionToken(), 'session-2');
+  assert.doesNotMatch(f.nodes.get('#resultBox').innerHTML || '', /無法建立工作階段/);
+});
+
+test('已有待同步收件時再次儲存並登入仍會更新快照', async () => {
+  const f = loadUi({ online: false });
+  f.nodes.get('#pin').value = 'test-pin';
+  f.ui.render({ ...f.guest, guestId: 'G001' });
+  await f.ui.mutate('receive');
+  let sessionNumber = 0;
+  f.context.jsonpRequest = async (settings, request) => {
+    f.requests.push(request);
+    sessionNumber += 1;
+    return { ok: true, status: 'SESSION_CREATED', sessionToken: 'session-' + sessionNumber,
+      operator: '工作人員', expiresAt: Date.now() + 10000, guests: [{ ...f.guest, guestId: 'G001' }] };
+  };
+
+  assert.equal(await f.ui.save(), true);
+  assert.equal(await f.ui.save(), true);
+  assert.equal(f.ui.queue()[0].status, 'queued');
+  assert.equal(f.ui.sessionToken(), 'session-2');
+  assert.doesNotMatch(f.nodes.get('#resultBox').innerHTML || '', /無法建立工作階段/);
+});
+
+test('再次儲存並登入遇到一次 API 逾時時會自動重試並更新快照', async () => {
+  const f = loadUi();
+  f.nodes.get('#pin').value = 'test-pin';
+  let attempt = 0;
+  f.context.jsonpRequest = async (settings, request) => {
+    f.requests.push(request);
+    attempt += 1;
+    if (attempt === 1) throw new Error('API 回應逾時');
+    return { ok: true, status: 'SESSION_CREATED', sessionToken: 'session-after-retry',
+      operator: '工作人員', expiresAt: Date.now() + 10000, guests: [{ ...f.guest, guestId: 'G001' }] };
+  };
+
+  assert.equal(await f.ui.save(), true);
+  assert.deepEqual(f.requests.map(request => request.action), ['session', 'session']);
+  assert.equal(f.ui.sessionToken(), 'session-after-retry');
+  assert.doesNotMatch(f.nodes.get('#resultBox').innerHTML || '', /無法建立工作階段/);
+});
+
 test('已登入快照讓賓客查詢立即顯示，不等待 Apps Script 往返', async () => {
   const f = loadUi();
   assert.equal(typeof f.ui.snapshot, 'function');
