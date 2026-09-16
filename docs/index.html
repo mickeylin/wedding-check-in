@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>婚禮禮金簿</title>
-  <link rel="stylesheet" href="./styles.css?v=0c65474dce2d">
+  <link rel="stylesheet" href="./styles.css?v=6bf5fb2f54dc">
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
@@ -35,7 +35,62 @@
       <strong>準備接待</strong><span>先登入下載名單，即可掃描或查找賓客。</span>
     </div>
 
-    <section class="panel scanner-panel" aria-labelledby="scannerTitle">
+    <nav class="mode-switch" aria-label="工作模式">
+      <button id="receptionMode" type="button" aria-pressed="true">接待收件</button>
+      <button id="countingMode" type="button" class="secondary-button" aria-pressed="false">紅包清點</button>
+    </nav>
+    <section id="countingPanel" class="panel counting-panel" aria-labelledby="countingTitle" hidden>
+      <h2 id="countingTitle">紅包清點</h2>
+      <p>依袋上編號找紅包；儲存經確認後才算完成。</p>
+      <div class="button-row">
+        <button id="countRefresh" type="button" class="secondary-button">重新載入清單</button>
+        <button id="countException" type="button">例外狀況／新增一包</button>
+      </div>
+      <p id="countStatus" role="status" aria-live="polite"></p>
+      <button id="countRetry" type="button" hidden>確認上次儲存結果／重試</button>
+      <form id="countEditor" hidden>
+        <h3 id="countEditorTitle" tabindex="-1"></h3>
+        <p id="countReceiptInfo"></p>
+        <fieldset id="countFields">
+          <label for="countGuestId">賓客編號（名單外或尚未確認可留白）</label>
+          <input id="countGuestId" autocomplete="off" autocapitalize="none" spellcheck="false">
+          <label for="countType">例外狀況</label>
+          <select id="countType">
+            <option value="">一般清點</option>
+            <option value="多包">同一賓客第二包／多包</option>
+            <option value="名單外">名單外送禮人</option>
+            <option value="署名不同／代送">署名不同／代送</option>
+            <option value="無法確認">無法確認送禮人／金額有疑問</option>
+          </select>
+          <p class="sync-help">署名不同或代送可直接修改目前這包；真正多了一包，請用「例外狀況／新增一包」。</p>
+          <label for="countSignature">紅包署名</label>
+          <input id="countSignature" maxlength="120" autocomplete="off">
+          <label for="countAmount">金額（未知請留白）</label>
+          <input id="countAmount" type="text" inputmode="decimal" placeholder="例如 3600" autocomplete="off">
+          <label for="countNotes">備註／待核對原因</label>
+          <textarea id="countNotes" rows="3" maxlength="500"></textarea>
+          <label for="countReason">更正原因（更正已清點資料必填）</label>
+          <input id="countReason" maxlength="500" autocomplete="off">
+          <div class="button-row">
+            <button id="countComplete" type="submit">確認清點</button>
+            <button id="countHold" type="button" class="secondary-button">記錄為待核對</button>
+          </div>
+          <button id="countClose" type="button" class="secondary-button">返回清單</button>
+        </fieldset>
+      </form>
+      <div id="countBrowser">
+        <label for="countSearch">紅包編號／賓客編號／姓名／署名</label>
+        <input id="countSearch" type="search" placeholder="例如 g001 或 E001" autocomplete="off">
+        <label for="countFilter">清點狀態</label>
+        <select id="countFilter">
+          <option value="待清點">待清點</option><option value="待核對">待核對</option>
+          <option value="已清點">已清點</option><option value="">全部</option>
+        </select>
+        <p id="countSummary" aria-live="polite"></p>
+        <div id="countRecords" class="lookup-results"></div>
+      </div>
+    </section>
+    <section id="receptionScanner" class="panel scanner-panel" aria-labelledby="scannerTitle">
       <div class="section-header">
         <h2 id="scannerTitle">掃 QR ／輸入編號</h2>
         <div class="button-row">
@@ -55,7 +110,7 @@
       </form>
     </section>
 
-    <section class="panel lookup-panel" aria-labelledby="lookupTitle">
+    <section id="receptionLookup" class="panel lookup-panel" aria-labelledby="lookupTitle">
       <div class="section-header">
         <div>
           <h2 id="lookupTitle">用姓名找賓客</h2>
@@ -133,6 +188,7 @@
   <!-- Update the content-hash version when changing each local asset. -->
   <script src="./checkin-gate.js?v=5bdec7e233a6"></script>
   <script src="./gift-queue.js?v=610add030021"></script>
-  <script src="./app.js?v=3df1b8fb478d"></script>
+  <script src="./app.js?v=f99ac60c1a93"></script>
+  <script src="./counting.js?v=c6ead9d3ca19"></script>
 </body>
 </html>

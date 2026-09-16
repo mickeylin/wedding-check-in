@@ -504,7 +504,7 @@ function renderGiftResult(data) {
   const detail = ['紅包：' + selectedGuest.giftState,
     selectedGuest.giftState === '未收件' ? '收到實體紅包後，請按「收到紅包」；只查桌號可直接下一位。' : selectedGuest.message || ''].join('\n');
   const tone = selectedGuest.giftState === '未收件' ? 'neutral'
-    : selectedGuest.giftState === '待同步' ? 'warn'
+    : ['待同步', '清點待核對'].includes(selectedGuest.giftState) ? 'warn'
       : selectedGuest.giftState === '待核對' ? 'error' : 'success';
   openCheckinGate(selectedGuest.displayName, detail, tone);
   elements.resultBox.hidden = true;

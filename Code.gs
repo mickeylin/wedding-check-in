@@ -100,6 +100,9 @@ function doGet(e) {
       requestId: String(params.requestId || '').trim(),
       receiptId: String(params.receiptId || '').trim()
     };
+  } else if (['countList', 'countSave'].indexOf(params.action) !== -1) {
+    payload = { action: params.action, sessionToken: String(params.sessionToken || ''),
+      requestId: String(params.requestId || ''), data: String(params.data || '') };
   } else if (params.action === 'lookup') {
     payload = {
       action: 'lookup',
@@ -303,6 +306,7 @@ function parseApiPayload_(e) {
 
   return {
     action: String(payload.action || 'guest').trim(),
+    data: typeof payload.data === 'string' ? payload.data : JSON.stringify(payload.data || {}),
     receiptId: String(payload.receiptId || '').trim(),
     guestId: String(payload.guestId || payload.token || payload.scan || '').trim(),
     pin: String(payload.pin || '').trim(),
@@ -331,6 +335,9 @@ function safeApiCall_(payload, now) {
       });
     }
 
+    if (['countList', 'countSave'].indexOf(payload.action) !== -1) {
+      return handleCountApi_(payload, now);
+    }
     if (payload.action === 'checkin') {
       throw apiError_('UPGRADE_REQUIRED', '請重新整理新版頁面；掃描已改為查詢，不再自動報到');
     }

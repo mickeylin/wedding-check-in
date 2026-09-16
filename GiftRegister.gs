@@ -1,7 +1,7 @@
 // Keep guest data and legacy attendance separate from envelope records.
 const GIFT_HEADERS = ['收件ID', '賓客ID', '顯示姓名', '紅包署名', '狀態', '金額',
   '收件人員', '收件時間', '清點人員', '清點時間', '備註', '收件請求ID',
-  '撤銷人員', '撤銷時間', '撤銷請求ID'];
+  '撤銷人員', '撤銷時間', '撤銷請求ID', '紅包編號', '例外類型'];
 const GIFT_AUDIT_HEADERS = ['時間', '操作人員', '動作', '收件ID', '賓客ID', '變更內容'];
 const GIFT_GUEST_CACHE_KEY = 'GIFT_GUEST_SNAPSHOT_V1';
 
@@ -12,16 +12,17 @@ function setupGiftRegister_(ss) {
   gifts.getRange('F2:F').setNumberFormat('#,##0.##');
   ['H2:H', 'J2:J', 'N2:N'].forEach(range => gifts.getRange(range).setNumberFormat('yyyy/mm/dd hh:mm:ss'));
   gifts.getRange('E2:E').setDataValidation(SpreadsheetApp.newDataValidation()
-    .requireValueInList(['待清點', '已清點', '已撤銷'], true).setAllowInvalid(false).build());
+    .requireValueInList(['待清點', '待核對', '已清點', '已撤銷'], true).setAllowInvalid(false).build());
   gifts.getRange('F2:F').setDataValidation(SpreadsheetApp.newDataValidation()
     .requireNumberGreaterThanOrEqualTo(0).setAllowInvalid(false).build());
   gifts.autoResizeColumns(1, GIFT_HEADERS.length);
   const dashboard = ss.getSheetByName('GiftDashboard') || ss.insertSheet('GiftDashboard');
-  dashboard.getRange(1, 1, 5, 2).setValues([
+  dashboard.getRange(1, 1, 6, 2).setValues([
     ['項目', '數值'], ['待清點包數', '=COUNTIF(Gifts!E2:E,"待清點")'],
     ['已清點包數', '=COUNTIF(Gifts!E2:E,"已清點")'],
     ['已撤銷包數', '=COUNTIF(Gifts!E2:E,"已撤銷")'],
-    ['已清點金額', '=SUMIF(Gifts!E2:E,"已清點",Gifts!F2:F)']
+    ['已清點金額', '=SUMIF(Gifts!E2:E,"已清點",Gifts!F2:F)'],
+    ['待核對包數', '=COUNTIF(Gifts!E2:E,"待核對")']
   ]);
 }
 
@@ -32,6 +33,11 @@ function requireGiftSchema_(ss, name, headers, create) {
   if (!sheet) throw apiError_('CONFIG_ERROR', '請先執行 setupSheet 建立 ' + name);
   if (!sheet.getLastRow() && create) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   const actual = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  if (create && name === 'Gifts' && headers.slice(0, 15).every((h, i) => actual[i] === h)
+    && actual.slice(15).every(value => value === '')) {
+    sheet.getRange(1, 16, 1, 2).setValues([headers.slice(15)]);
+    actual.splice(15, 2, ...headers.slice(15));
+  }
   if (headers.some((header, i) => actual[i] !== header)) {
     throw apiError_('CONFIG_ERROR', name + ' 欄位順序不符，請勿直接搬移欄位');
   }
@@ -43,14 +49,16 @@ function giftRecord_(row, rowNumber) {
     displayName: String(row[2] || ''), signature: String(row[3] || ''), state: String(row[4] || ''),
     amount: row[5], receivedBy: row[6], receivedAt: row[7], countedBy: row[8], countedAt: row[9],
     notes: row[10], requestId: String(row[11] || ''), cancelledBy: row[12], cancelledAt: row[13],
-    cancelRequestId: String(row[14] || '') };
+    cancelRequestId: String(row[14] || ''), envelopeCode: String(row[15] || ''),
+    exceptionType: String(row[16] || '') };
 }
 
 function giftStatus_(records) {
   const active = records.filter(record => record.state !== '已撤銷');
   if (!active.length) return { giftState: '未收件', receiptId: '', canCancel: false };
   const one = active.length === 1 ? active[0] : null;
-  return { giftState: active.some(record => record.state === '已清點') ? '已清點' : '待清點',
+  return { giftState: active.some(record => record.state === '待核對') ? '清點待核對'
+      : active.every(record => record.state === '已清點') ? '已清點' : '待清點',
     receiptId: one ? one.receiptId : '',
     canCancel: !!one && one.state === '待清點' && one.amount === '' && !one.countedAt,
     envelopeCount: active.length };
@@ -152,7 +160,7 @@ function createGiftModule_(deps) {
           if (!record || !input.receiptId) throw apiError_('STALE_RECEIPT', '收件已變更，請重新查詢');
           if (record.state === '已撤銷') return response('ALREADY_CANCELLED', '這筆收件已撤銷');
           if (record.state !== '待清點' || record.amount !== '' || record.countedAt) {
-            throw apiError_('COUNTED', '已清點或已填金額，請到 Google Sheet 更正');
+            throw apiError_('COUNTED', '已清點或已填金額，請切換紅包清點更正');
           }
           deps.store.cancel(record, input.operator, deps.clock(), input.requestId);
           record.state = '已撤銷';
@@ -181,13 +189,13 @@ function createGiftStore_(ss) {
     receive(record) {
       // The row itself durably contains the receive event, even if an audit append fails.
       sheet.appendRow([record.receiptId, sheetText_(record.guestId), sheetText_(record.displayName), '', '待清點', '',
-        sheetText_(record.receivedBy), record.receivedAt, '', '', '', record.requestId, '', '', '']);
+        sheetText_(record.receivedBy), record.receivedAt, '', '', '', record.requestId, '', '', '', '', '']);
     },
     cancel(record, operator, now, requestId) {
       const current = giftRecord_(sheet.getRange(record.rowNumber, 1, 1, GIFT_HEADERS.length).getValues()[0], record.rowNumber);
       if (current.receiptId !== record.receiptId) throw apiError_('STALE_RECEIPT', '資料列已變動，請重新查詢');
       if (current.state !== '待清點' || current.amount !== '' || current.countedAt) {
-        throw apiError_('COUNTED', '已清點或已填金額，請到 Google Sheet 更正');
+        throw apiError_('COUNTED', '已清點或已填金額，請切換紅包清點更正');
       }
       sheet.getRange(record.rowNumber, 13, 1, 3).setValues([[sheetText_(operator), now, requestId]]);
       sheet.getRange(record.rowNumber, 5).setValue('已撤銷');
@@ -197,7 +205,7 @@ function createGiftStore_(ss) {
 
 function sheetText_(value) {
   const text = String(value || '');
-  return /^[=+@-]/.test(text) ? "'" + text : text;
+  return /^[=+@'-]/.test(text) ? "'" + text : text;
 }
 
 function handleGiftApi_(payload, now) {
