@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>婚禮禮金簿</title>
-  <link rel="stylesheet" href="./styles.css?v=6bf5fb2f54dc">
+  <link rel="stylesheet" href="./styles.css?v=ac13296ff6f3">
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
@@ -41,13 +41,19 @@
     </nav>
     <section id="countingPanel" class="panel counting-panel" aria-labelledby="countingTitle" hidden>
       <h2 id="countingTitle">紅包清點</h2>
-      <p>依袋上編號找紅包；儲存經確認後才算完成。</p>
+      <p>依袋上編號找紅包；先安全保存在手機並背景同步，顯示「已同步」才算進入帳本。</p>
       <div class="button-row">
         <button id="countRefresh" type="button" class="secondary-button">重新載入清單</button>
         <button id="countException" type="button">例外狀況／新增一包</button>
       </div>
       <p id="countStatus" role="status" aria-live="polite"></p>
-      <button id="countRetry" type="button" hidden>確認上次儲存結果／重試</button>
+      <section class="count-queue" aria-label="清點同步">
+        <div class="section-header">
+          <p id="countQueueSummary">沒有待同步清點</p>
+          <button id="countRetry" class="secondary-button compact-button" type="button" hidden>立即重試</button>
+        </div>
+        <ol id="countQueueList" class="sync-list" aria-live="polite"></ol>
+      </section>
       <form id="countEditor" hidden>
         <h3 id="countEditorTitle" tabindex="-1"></h3>
         <p id="countReceiptInfo"></p>
@@ -189,6 +195,7 @@
   <script src="./checkin-gate.js?v=5bdec7e233a6"></script>
   <script src="./gift-queue.js?v=610add030021"></script>
   <script src="./app.js?v=f99ac60c1a93"></script>
-  <script src="./counting.js?v=c6ead9d3ca19"></script>
+  <script src="./count-queue.js?v=e9c5a9cff383"></script>
+  <script src="./counting.js?v=5ceed5f503f9"></script>
 </body>
 </html>

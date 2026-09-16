@@ -464,6 +464,8 @@ textarea { width: 100%; font: inherit; font-size: 16px; border: 1px solid var(--
 #countReceiptInfo { white-space: pre-line; overflow-wrap: anywhere; }
 .count-record { display: grid; text-align: left; gap: 6px; background: var(--panel); color: var(--ink); border: 1px solid var(--line); }
 .count-record span { font-size: 14px; font-weight: normal; }
+.count-queue { margin: .75rem 0 1rem; padding: .75rem; border: 1px solid var(--line); border-radius: .75rem; }
+.count-queue p { margin: 0; }
 @media (max-width: 640px) {
   .topbar { gap: 8px; padding: 14px 16px; }
   h1 { font-size: 21px; }

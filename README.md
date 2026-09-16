@@ -13,7 +13,7 @@
 - Google Sheet 的 Gifts、GiftAudit 與 GiftDashboard；清點欄位驗證、編輯觸發器與統計。
 - Guests 精簡為賓客ID、顯示姓名、分類、桌號與備註；升級前自動封存完整舊表。舊 ScanLog、Dashboard 改名封存並隱藏。
 - 登入後自動收合設定；桌號與編號集中顯示在賓客結果卡，接待操作與同步紀錄分區。
-- 手機紅包清點、已清點更正與例外紅包：每包獨立記錄、E 編號、待核對清單、版本衝突檢查及逾時安全重試。
+- 手機紅包清點、已清點更正與例外紅包：先保存手機並背景同步，每包獨立記錄、E 編號、待核對清單、版本衝突檢查及逾時安全重試。
 
 尚未在正式 Apps Script、Google Sheet 或實際手機相機上驗證。Sheet 編輯紀錄有平台限制，見操作文件；名單匯入格式待正式名單確認後決定。
 
@@ -22,7 +22,7 @@
 - `Code.gs`：賓客查找、PIN/session、API 路由及既有資料相容邏輯。
 - `CountGifts.gs`：清點清單、例外紅包、更正及衝突／重試保護。使用方式見[手機清點說明](docs/mobile-gift-counting.md)。
 - `GiftRegister.gs`：禮金收件、撤銷、工作表初始化與編輯紀錄。
-- `docs/index.html`、`docs/app.js`、`docs/counting.js`、`docs/gift-queue.js`、`docs/styles.css`：手機操作頁、清點介面與本機收件佇列。
+- `docs/index.html`、`docs/app.js`、`docs/counting.js`、`docs/count-queue.js`、`docs/gift-queue.js`、`docs/styles.css`：手機操作頁、清點介面與本機收件／清點佇列。
 - `test/`：Node 原生測試，包含後端狀態、Sheet adapter 及前端互動測試。
 
 ## 部署摘要

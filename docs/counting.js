@@ -1,32 +1,54 @@
-/* Mobile counting: independent of the offline receipt queue. Never report an
- * unconfirmed money write as successful. Retain one immutable request to retry. */
+/* Mobile counting is local-first. A confirmed form is durably queued on this
+ * device, then sent in the background with one immutable request id. */
 (() => {
   const ids = ['receptionMode', 'countingMode', 'countingPanel', 'receptionScanner', 'receptionLookup',
-    'countRefresh', 'countException', 'countStatus', 'countRetry', 'countEditor', 'countEditorTitle',
-    'countReceiptInfo', 'countFields', 'countGuestId', 'countType', 'countSignature', 'countAmount',
-    'countNotes', 'countReason', 'countComplete', 'countHold', 'countClose', 'countBrowser',
-    'countSearch', 'countFilter', 'countSummary', 'countRecords'];
+    'countRefresh', 'countException', 'countStatus', 'countRetry', 'countQueueSummary', 'countQueueList',
+    'countEditor', 'countEditorTitle', 'countReceiptInfo', 'countFields', 'countGuestId', 'countType',
+    'countSignature', 'countAmount', 'countNotes', 'countReason', 'countComplete', 'countHold',
+    'countClose', 'countBrowser', 'countSearch', 'countFilter', 'countSummary', 'countRecords'];
   const el = Object.fromEntries(ids.map(id => [id, document.querySelector('#' + id)]));
-  const STORAGE = 'wedding-gift-count-draft-v1';
-  let records = [], selected = null, pending = null, busy = false, draft = null;
-  let reading = false, loaded = false;
+  const DRAFT_STORAGE = 'wedding-gift-count-draft-v1';
+  const QUEUE_STORAGE = 'wedding-gift-count-queue-v1';
+  const RETRY_DELAYS = [5000, 15000, 30000];
+  const queueModel = window.CountQueueModel;
+  let records = [], queue = [], selected = null, draft = null;
+  let busy = false, reading = false, loaded = false, queueStorageAvailable = true;
+  let syncPromise = null, retryTimer = null;
+
   const message = (text, tone = '') => {
     el.countStatus.textContent = text; el.countStatus.dataset.tone = tone;
   };
-  function fields() {
-    return { guestId: el.countGuestId.value.trim(), exceptionType: el.countType.value,
-      signature: el.countSignature.value.trim(), amount: el.countAmount.value.trim(),
-      notes: el.countNotes.value.trim(), reason: el.countReason.value.trim() };
+  const fields = () => ({ guestId: el.countGuestId.value.trim(), exceptionType: el.countType.value,
+    signature: el.countSignature.value.trim(), amount: el.countAmount.value.trim(),
+    notes: el.countNotes.value.trim(), reason: el.countReason.value.trim() });
+  const queueSummary = () => queueModel ? queueModel.summary(queue) : { pending: 0, attention: 0, completed: 0 };
+
+  function persistDraft() {
+    if (draft) window.sessionStorage.setItem(DRAFT_STORAGE, JSON.stringify({ draft }));
+    else window.sessionStorage.removeItem(DRAFT_STORAGE);
   }
-  function persist() {
-    window.sessionStorage.setItem(STORAGE, JSON.stringify({ draft, pending }));
+  function persistQueue(next) {
+    if (!queueModel) return false;
+    try {
+      queue = queueModel.compact(next);
+      window.localStorage.setItem(QUEUE_STORAGE, JSON.stringify(queue));
+      queueStorageAvailable = true;
+      renderQueue();
+      return true;
+    } catch (err) {
+      queueStorageAvailable = false;
+      message('手機無法保存清點佇列；尚未送出，請先修復瀏覽器儲存空間。', 'error');
+      renderQueue();
+      return false;
+    }
   }
   function controls() {
-    el.countFields.disabled = busy || !!pending;
+    el.countFields.disabled = busy;
     el.countRefresh.disabled = busy || reading;
-    el.countException.disabled = busy || !!pending;
-    el.countRetry.hidden = !pending;
-    el.countRetry.disabled = busy;
+    el.countException.disabled = busy || !queueStorageAvailable;
+    const summary = queueSummary();
+    el.countRetry.hidden = !summary.pending;
+    el.countRetry.disabled = !!syncPromise || !summary.pending;
   }
   function fill(data) {
     for (const [key, id] of Object.entries({ guestId: 'countGuestId', exceptionType: 'countType',
@@ -36,36 +58,38 @@
     el.countGuestId.disabled = !!(selected && selected.guestId);
   }
   function open(record, restored) {
-    if (pending && !restored) return;
+    if (record && queueModel.findForReceipt(queue, record.receiptId)) {
+      message('這包已有待同步清點，請先處理其他包。', 'error'); return;
+    }
     if (!restored && draft && !window.confirm('放棄目前未儲存的清點內容？')) return;
     selected = record;
     draft = restored || { selected: record, values: record
       ? { ...record, signature: record.signature || record.displayName, reason: '' }
       : { guestId: '', signature: '', amount: '', exceptionType: '名單外', notes: '', reason: '' } };
     fill(draft.values);
-    el.countEditor.hidden = false;
-    el.countBrowser.hidden = true;
+    el.countEditor.hidden = false; el.countBrowser.hidden = true;
     el.countEditorTitle.textContent = record
       ? (record.state === '已清點' ? '更正清點：' : '清點：') + (record.envelopeCode || record.guestId)
       : '新增例外紅包';
     el.countReceiptInfo.textContent = record
       ? record.displayName + '・' + record.state + '\n收件：' + record.receivedBy + ' ' + record.receivedAt
         + (record.countedBy ? '\n上次清點：' + record.countedBy + ' ' + record.countedAt : '')
-      : '新增代表另一包實體紅包。儲存成功後請將系統產生的 E 編號寫在袋上。';
-    controls();
-    el.countEditorTitle.focus();
-    try { persist(); } catch (err) { message('無法保留草稿；請勿關閉分頁。', 'error'); }
+      : '新增代表另一包實體紅包。同步成功取得 E 編號前，請將這包隔離。';
+    controls(); el.countEditorTitle.focus();
+    try { persistDraft(); } catch (err) { message('無法保留草稿；請勿關閉分頁。', 'error'); }
   }
   function render() {
     const query = el.countSearch.value.trim().toLowerCase();
     const state = el.countFilter.value;
-    const visible = records.filter(r => (!state || r.state === state) &&
-      (!query || [r.envelopeCode, r.guestId, r.displayName, r.signature].some(v => String(v || '').toLowerCase().includes(query))));
-    const total = records.filter(r => r.state === '已清點').reduce((sum, r) => sum + Math.round(Number(r.amount || 0) * 100), 0) / 100;
+    const visible = records.filter(record => (!state || record.state === state) &&
+      (!query || [record.envelopeCode, record.guestId, record.displayName, record.signature]
+        .some(value => String(value || '').toLowerCase().includes(query))));
+    const total = records.filter(record => record.state === '已清點')
+      .reduce((sum, record) => sum + Math.round(Number(record.amount || 0) * 100), 0) / 100;
     el.countSummary.textContent = loaded
-      ? '待清點 ' + records.filter(r => r.state === '待清點').length + ' 包・待核對 ' +
-        records.filter(r => r.state === '待核對').length + ' 包・已清點總額 ' + total.toLocaleString('zh-TW') +
-        '（上次載入）・符合 ' + visible.length + ' 包'
+      ? '待清點 ' + records.filter(record => record.state === '待清點').length + ' 包・待核對 ' +
+        records.filter(record => record.state === '待核對').length + ' 包・已清點總額 ' +
+        total.toLocaleString('zh-TW') + '（上次載入）・符合 ' + visible.length + ' 包'
       : '尚未載入清點紀錄';
     el.countRecords.replaceChildren();
     if (loaded && !visible.length) {
@@ -74,19 +98,57 @@
       el.countRecords.append(hint);
     }
     visible.forEach(record => {
+      const pending = queueModel.findForReceipt(queue, record.receiptId);
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'count-record'; button.disabled = !!pending || busy;
       const title = document.createElement('strong');
       title.textContent = (record.envelopeCode || record.guestId || '未編號') + '・' + (record.signature || record.displayName);
       const detail = document.createElement('span');
       detail.textContent = record.state + '・金額 ' + (record.amount === '' ? '尚未確認' : record.amount) +
-        (record.exceptionType ? '・' + record.exceptionType : '') + '・收件 ' + record.receivedBy + ' ' + record.receivedAt;
+        (record.exceptionType ? '・' + record.exceptionType : '') + '・收件 ' + record.receivedBy + ' ' + record.receivedAt +
+        (pending ? '・清點' + queueStatusLabel(pending) : '');
       button.append(title, detail); button.addEventListener('click', () => open(record));
       el.countRecords.append(button);
     });
+    controls();
+  }
+  function queueStatusLabel(item) {
+    return ({ queued: '待同步', syncing: '同步中', retry_wait: '等待重試', needs_login: '等待登入',
+      attention: '需要核對', synced: '已同步', resolved: '已人工核對' })[item.status] || item.status;
+  }
+  function renderQueue() {
+    const summary = queueSummary();
+    el.countQueueSummary.textContent = !queueStorageAvailable ? '手機儲存異常：不可安全清點新紅包'
+      : summary.attention ? summary.attention + ' 筆需核對，' + summary.pending + ' 筆待同步'
+        : summary.pending ? summary.pending + ' 筆已保存在手機、尚未進入 Google Sheet'
+          : '沒有待同步清點';
+    el.countQueueList.replaceChildren();
+    queue.slice(-20).reverse().forEach(item => {
+      const row = document.createElement('li');
+      const title = document.createElement('strong');
+      const serverCode = item.serverRecord && item.serverRecord.envelopeCode;
+      title.textContent = (serverCode || item.label) + '：' + queueStatusLabel(item);
+      const detail = document.createElement('small');
+      detail.textContent = '清點人員：' + item.operator + '・嘗試 ' + Number(item.attempts || 0) + ' 次' +
+        (item.lastError ? '・' + item.lastError : '');
+      row.append(title, detail);
+      if (item.status === 'attention') {
+        const resolve = document.createElement('button');
+        resolve.type = 'button'; resolve.className = 'secondary-button compact-button';
+        resolve.textContent = '已人工核對，移除待辦';
+        resolve.addEventListener('click', () => {
+          if (!window.confirm('請先核對 Google Sheet、GiftAudit 與實體紅包。確定這筆已人工處理？')) return;
+          persistQueue(queueModel.update(queue, item.requestId, { status: 'resolved', lastError: '' }));
+          render();
+        });
+        row.append(resolve);
+      }
+      el.countQueueList.append(row);
+    });
+    controls();
   }
   async function authenticate() {
-    if (!isBrowserOnline()) { message('目前離線。輸入會留在本分頁，連線後再確認儲存。', 'error'); return false; }
+    if (!isBrowserOnline()) { message('目前離線；清點會保留在手機，連線後再同步。', 'error'); return false; }
     if (!validateSettings() || !(await ensureSession())) {
       message('請先展開登入與設定，登入後再回到清點。', 'error'); return false;
     }
@@ -104,13 +166,12 @@
         throw new Error(data && data.message || '清點功能尚未部署，請更新 Apps Script');
       }
       records = data.records; loaded = true; render();
-      message(pending ? '上次儲存仍待確認，請按「確認上次儲存結果／重試」。'
-        : draft ? '清單已更新；目前草稿仍保留。如有衝突，返回清單重新選取。' : '清單已更新，請依紅包上的編號查找。');
+      message(queueSummary().pending ? '清單已更新；本機仍有清點在背景同步。' : '清單已更新，請依紅包上的編號查找。');
     } catch (err) { message(messageOf(err), 'error'); }
     finally { reading = false; controls(); }
   }
   async function save(state) {
-    if (busy || pending) return;
+    if (busy) return;
     const value = fields();
     if (value.amount && !/^\d{1,9}(\.\d{1,2})?$/.test(value.amount)) { message('金額需為非負數，最多九位整數及兩位小數。', 'error'); return; }
     if (state === '已清點' && (!value.signature || value.amount === '')) { message('請填署名與金額；未知金額請留白並選待核對。', 'error'); return; }
@@ -119,66 +180,110 @@
     if (!selected && value.exceptionType === '多包' && !value.guestId) { message('第二包需填原賓客編號。', 'error'); return; }
     if (selected && selected.state === '已清點' && !value.reason) { message('請填更正原因。', 'error'); return; }
     draft = { selected, values: value };
-    try { persist(); } catch (err) { message('無法保存重試資料，請先修復瀏覽器儲存空間。', 'error'); return; }
-    // Lock the editor before asynchronous login so a double tap cannot create two operations.
+    try { persistDraft(); } catch (err) { message('無法保存草稿，請先修復瀏覽器儲存空間。', 'error'); return; }
     busy = true; controls();
     try {
-      if (!(await authenticate())) return;
+      if (!queueModel || !validateSettings()) return;
+      const settings = getSettings();
+      const operator = readSessionOperator();
+      if (!settings.apiUrl || !operator) { message('請先完成登入，再保存清點。', 'error'); return; }
       if (!window.confirm((selected ? '紅包 ' + (selected.envelopeCode || selected.guestId) : '新增一包例外紅包') +
         '\n署名：' + (value.signature || '待確認') + '\n金額：' + (value.amount === '' ? '未知' : value.amount) +
-        '\n狀態：' + state + '\n確認儲存？')) return;
-      pending = { requestId: createRequestId(), operator: readSessionOperator(), apiUrl: getSettings().apiUrl,
-        data: { ...value, receiptId: selected ? selected.receiptId : '', version: selected ? selected.version : '', state } };
-      try { persist(); } catch (err) {
-        pending = null; message('無法保存重試資料，尚未送出。', 'error'); return;
-      }
-    } finally { busy = false; controls(); }
-    if (pending) await sendPending();
-  }
-  async function sendPending() {
-    if (!pending || busy) return;
-    busy = true; controls();
-    try {
-      if (!(await authenticate())) return;
-      if (readSessionOperator() !== pending.operator || getSettings().apiUrl !== pending.apiUrl) {
-        message('請使用原操作人員「' + pending.operator + '」及原帳本網址重新登入後確認。', 'error'); return;
-      }
-      message('正在確認儲存，請保留此分頁…');
-      const data = await jsonpRequest(getSettings(), { action: 'countSave', sessionToken: readSessionToken(),
-        requestId: pending.requestId, data: JSON.stringify(pending.data) });
-      if (data && data.ok && ['COUNT_SAVED', 'COUNT_REPLAY'].includes(data.status) && data.record) {
-        const record = data.record;
-        // The reception snapshot predates this edit; fetch fresh status next time.
-        if (record.guestId && typeof guestSnapshot !== 'undefined') {
-          guestSnapshot.delete(record.guestId);
-          try { window.sessionStorage.setItem(GUEST_SNAPSHOT_STORAGE_KEY, JSON.stringify(Array.from(guestSnapshot.values()))); }
-          catch (err) { /* Server validation remains authoritative if cache persistence fails. */ }
-        }
-        records = records.filter(r => r.receiptId !== record.receiptId);
-        if (record.state !== '已撤銷') records.push(record);
-        pending = null; draft = null; selected = null;
-        let storageWarning = '';
-        try { window.sessionStorage.removeItem(STORAGE); }
-        catch (err) { storageWarning = '\n草稿清除失敗；重新開啟時請先核對已儲存紀錄。'; }
-        el.countEditor.hidden = true; el.countBrowser.hidden = false; render();
-        message('已確認：' + (record.envelopeCode || record.guestId) + '・' + record.state +
-          (record.amount === '' ? '・金額尚未確認' : '・金額 ' + record.amount) +
-          (record.envelopeCode ? '\n請在實體紅包上寫「' + record.envelopeCode + '」。' : '') +
-          '\n可以處理下一包。' + storageWarning, 'success');
-        el.countSearch.focus();
+        '\n狀態：' + state + '\n確認保存到手機並背景同步？')) return;
+      const data = { ...value, receiptId: selected ? selected.receiptId : '',
+        version: selected ? selected.version : '', state };
+      const added = queueModel.enqueue(queue, { requestId: createRequestId(), operator, apiUrl: settings.apiUrl,
+        label: selected ? (selected.envelopeCode || selected.guestId) : (value.signature || '例外紅包'), data });
+      if (!added.ok) {
+        message(added.reason === 'DUPLICATE_LOCAL' ? '這包已有待同步清點，請勿重複送出。' : '無法建立清點待辦。', 'error');
         return;
       }
-      if (data && data.status === 'UNAUTHORIZED') {
-        handleUnauthorized(data.message); message('登入已過期。請以原人員重新登入，再確認上次儲存結果。', 'error'); return;
-      }
-      if (data && ['BAD_REQUEST', 'CONFLICT', 'REQUEST_REUSED'].includes(data.status)) {
-        pending = null; persist();
-        message(data.message + '。草稿仍保留；衝突時請返回清單，重新載入並核對。', 'error'); return;
-      }
-      throw new Error(data && data.message || '尚未取得儲存確認');
-    } catch (err) {
-      message(messageOf(err) + '。尚未確認完成；請保留分頁並按重試，勿另新增同一包。', 'error');
+      if (!persistQueue(added.items)) return;
+      draft = null; selected = null;
+      try { persistDraft(); } catch (err) { /* Queue is already durable and authoritative. */ }
+      el.countEditor.hidden = true; el.countBrowser.hidden = false; render();
+      const offline = !isBrowserOnline() ? '目前離線；' : '';
+      message(offline + (data.receiptId ? '清點已保存在這支手機，正在背景同步；可以處理下一包。'
+        : '例外紅包已保存在這支手機；取得 E 編號前請隔離這包，可先處理其他包。') +
+        ' 只有顯示「已同步」才代表已進入 Google Sheet。', 'success');
     } finally { busy = false; controls(); render(); }
+    kickQueue();
+  }
+  function scheduleQueue(delay) {
+    if (!queueSummary().pending || typeof window.setTimeout !== 'function') return;
+    if (retryTimer && typeof window.clearTimeout === 'function') window.clearTimeout(retryTimer);
+    retryTimer = window.setTimeout(() => { retryTimer = null; kickQueue(); }, delay);
+  }
+  function kickQueue() {
+    if (syncPromise) return syncPromise;
+    syncPromise = drainQueue().finally(() => { syncPromise = null; renderQueue(); render(); });
+    renderQueue();
+    return syncPromise;
+  }
+  function applyServerRecord(record) {
+    if (record.guestId && typeof guestSnapshot !== 'undefined') {
+      guestSnapshot.delete(record.guestId);
+      try { window.sessionStorage.setItem(GUEST_SNAPSHOT_STORAGE_KEY, JSON.stringify(Array.from(guestSnapshot.values()))); }
+      catch (err) { /* Server validation remains authoritative. */ }
+    }
+    records = records.filter(item => item.receiptId !== record.receiptId);
+    if (record.state !== '已撤銷') records.push(record);
+  }
+  async function drainQueue() {
+    while (queueStorageAvailable) {
+      const item = queueModel.nextSyncable(queue);
+      if (!item || !isBrowserOnline()) return;
+      const settings = getSettings();
+      const token = readSessionToken();
+      const operator = readSessionOperator();
+      if (!token || settings.apiUrl !== item.apiUrl || operator !== item.operator) {
+        message(operator && operator !== item.operator
+          ? '待同步清點屬於原操作人員「' + item.operator + '」，請用該人員重新登入後重試。'
+          : '待同步清點需要重新登入後重試。', 'error');
+        return;
+      }
+      const attempts = Number(item.attempts || 0) + 1;
+      if (!persistQueue(queueModel.update(queue, item.requestId, { status: 'syncing', attempts, lastError: '' }))) return;
+      let data;
+      try {
+        data = await jsonpRequest(settings, { action: 'countSave', sessionToken: token,
+          requestId: item.requestId, data: JSON.stringify(item.data) });
+      } catch (err) {
+        persistQueue(queueModel.update(queue, item.requestId, { status: 'retry_wait',
+          lastError: messageOf(err) + '；保留同一請求編號重試' }));
+        scheduleQueue(RETRY_DELAYS[Math.min(attempts - 1, RETRY_DELAYS.length - 1)]);
+        return;
+      }
+      if (data && data.ok && ['COUNT_SAVED', 'COUNT_REPLAY'].includes(data.status) && data.record) {
+        applyServerRecord(data.record);
+        persistQueue(queueModel.update(queue, item.requestId, { status: 'synced', syncedAt: Date.now(),
+          lastError: '', serverRecord: data.record }));
+        message('已同步：' + (data.record.envelopeCode || data.record.guestId) + '・' + data.record.state +
+          (data.record.envelopeCode ? '\n請立即在隔離的實體紅包寫「' + data.record.envelopeCode + '」。' : ''), 'success');
+        render();
+        continue;
+      }
+      if (data && data.status === 'UNAUTHORIZED') {
+        handleUnauthorized(data.message);
+        persistQueue(queueModel.update(queue, item.requestId, { status: 'needs_login', lastError: '登入已過期，請重新登入' }));
+        return;
+      }
+      if (data && (data.retryable || data.status === 'BUSY')) {
+        persistQueue(queueModel.update(queue, item.requestId, { status: 'retry_wait',
+          lastError: (data.message || '後端忙碌') + '；將自動重試' }));
+        scheduleQueue(RETRY_DELAYS[Math.min(attempts - 1, RETRY_DELAYS.length - 1)]);
+        return;
+      }
+      persistQueue(queueModel.update(queue, item.requestId, { status: 'attention',
+        lastError: data && data.message || '同步結果無法確認，請依 GiftAudit 與實體紅包核對' }));
+    }
+  }
+  async function retryNow() {
+    if (!(await authenticate())) return;
+    const operator = readSessionOperator();
+    persistQueue(queue.map(item => item.status === 'needs_login' && item.operator === operator
+      ? { ...item, status: 'queued', lastError: '' } : item));
+    await kickQueue();
   }
   async function mode(counting) {
     if (counting) {
@@ -191,37 +296,48 @@
     el.receptionMode.setAttribute('aria-pressed', String(!counting));
     el.countingMode.className = counting ? '' : 'secondary-button';
     el.receptionMode.className = counting ? 'secondary-button' : '';
-    if (counting && !loaded && !draft && !pending) await refresh();
+    if (counting && !loaded && !draft) await refresh();
   }
+
   el.countingMode.addEventListener('click', () => mode(true));
   el.receptionMode.addEventListener('click', () => mode(false));
   el.countRefresh.addEventListener('click', refresh);
   el.countException.addEventListener('click', () => open(null));
   el.countEditor.addEventListener('submit', event => { event.preventDefault(); save('已清點'); });
   el.countHold.addEventListener('click', () => save('待核對'));
-  el.countRetry.addEventListener('click', sendPending);
+  el.countRetry.addEventListener('click', retryNow);
   el.countSearch.addEventListener('input', render);
   el.countFilter.addEventListener('change', render);
   el.countEditor.addEventListener('input', () => {
-    if (pending) return;
     draft = { selected, values: fields() };
-    try { persist(); } catch (err) { message('無法保留草稿；請勿關閉分頁。', 'error'); }
+    try { persistDraft(); } catch (err) { message('無法保留草稿；請勿關閉分頁。', 'error'); }
   });
   el.countClose.addEventListener('click', () => {
-    if (busy || pending || !window.confirm('返回清單會放棄未儲存的清點內容，確定？')) return;
-    draft = null; selected = null; persist();
+    if (busy || !window.confirm('返回清單會放棄未儲存的清點內容，確定？')) return;
+    draft = null; selected = null; persistDraft();
     el.countEditor.hidden = true; el.countBrowser.hidden = false; render();
   });
+
   try {
-    const saved = JSON.parse(window.sessionStorage.getItem(STORAGE) || 'null');
-    if (saved) {
-      pending = saved.pending || null; draft = saved.draft || null;
-      if (draft) { selected = draft.selected; open(selected, draft); }
-      if (pending || draft) {
-        mode(true);
-        message(pending ? '有一筆儲存結果待確認，請重新登入後按重試。' : '已還原上次未儲存的草稿。');
-      }
+    if (!queueModel) throw new Error('清點佇列程式未載入');
+    queue = queueModel.recover(JSON.parse(window.localStorage.getItem(QUEUE_STORAGE) || '[]'));
+    window.localStorage.setItem(QUEUE_STORAGE, JSON.stringify(queue));
+  } catch (err) {
+    queue = []; queueStorageAvailable = false;
+    message('無法讀取清點佇列；不可安全清點新紅包。', 'error');
+  }
+  try {
+    const saved = JSON.parse(window.sessionStorage.getItem(DRAFT_STORAGE) || 'null');
+    if (saved && saved.pending && queueStorageAvailable) {
+      const migrated = queueModel.enqueue(queue, { ...saved.pending,
+        label: saved.pending.data && (saved.pending.data.guestId || saved.pending.data.signature) });
+      if (migrated.ok) persistQueue(migrated.items);
+      window.sessionStorage.removeItem(DRAFT_STORAGE);
+    } else if (saved && saved.draft) {
+      draft = saved.draft; selected = draft.selected; open(selected, draft);
+      mode(true); message('已還原上次未儲存的草稿。');
     }
   } catch (err) { message('無法讀取清點草稿，請先核對帳本後再操作。', 'error'); }
-  controls(); render();
+  renderQueue(); controls(); render();
+  if (queueSummary().pending) kickQueue();
 })();
