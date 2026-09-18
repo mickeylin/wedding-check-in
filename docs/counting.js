@@ -2,7 +2,7 @@
  * device, then sent in the background with one immutable request id. */
 (() => {
   const ids = ['receptionMode', 'countingMode', 'countingPanel', 'receptionScanner', 'receptionLookup',
-    'countRefresh', 'countException', 'countStatus', 'countRetry', 'countQueueSummary', 'countQueueList',
+    'countRefresh', 'countException', 'countStatus', 'countRetry', 'countQueueSection', 'countQueueSummary', 'countQueueList',
     'countEditor', 'countEditorTitle', 'countReceiptInfo', 'countFields', 'countGuestId', 'countType',
     'countSignature', 'countAmount', 'countNotes', 'countReason', 'countComplete', 'countHold',
     'countClose', 'countBrowser', 'countSearch', 'countFilter', 'countSummary', 'countRecords'];
@@ -89,7 +89,7 @@
     el.countSummary.textContent = loaded
       ? '待清點 ' + records.filter(record => record.state === '待清點').length + ' 包・待核對 ' +
         records.filter(record => record.state === '待核對').length + ' 包・已清點總額 ' +
-        total.toLocaleString('zh-TW') + '（上次載入）・符合 ' + visible.length + ' 包'
+        total.toLocaleString('zh-TW')
       : '尚未載入清點紀錄';
     el.countRecords.replaceChildren();
     if (loaded && !visible.length) {
@@ -105,7 +105,7 @@
       title.textContent = (record.envelopeCode || record.guestId || '未編號') + '・' + (record.signature || record.displayName);
       const detail = document.createElement('span');
       detail.textContent = record.state + '・金額 ' + (record.amount === '' ? '尚未確認' : record.amount) +
-        (record.exceptionType ? '・' + record.exceptionType : '') + '・收件 ' + record.receivedBy + ' ' + record.receivedAt +
+        (record.exceptionType ? '・' + record.exceptionType : '') +
         (pending ? '・清點' + queueStatusLabel(pending) : '');
       button.append(title, detail); button.addEventListener('click', () => open(record));
       el.countRecords.append(button);
@@ -118,12 +118,13 @@
   }
   function renderQueue() {
     const summary = queueSummary();
+    el.countQueueSection.hidden = queueStorageAvailable && !summary.pending && !summary.attention;
     el.countQueueSummary.textContent = !queueStorageAvailable ? '手機儲存異常：不可安全清點新紅包'
       : summary.attention ? summary.attention + ' 筆需核對，' + summary.pending + ' 筆待同步'
         : summary.pending ? summary.pending + ' 筆已保存在手機、尚未進入 Google Sheet'
           : '沒有待同步清點';
     el.countQueueList.replaceChildren();
-    queue.slice(-20).reverse().forEach(item => {
+    queue.filter(item => !['synced', 'resolved'].includes(item.status)).slice(-20).reverse().forEach(item => {
       const row = document.createElement('li');
       const title = document.createElement('strong');
       const serverCode = item.serverRecord && item.serverRecord.envelopeCode;
@@ -203,9 +204,8 @@
       try { persistDraft(); } catch (err) { /* Queue is already durable and authoritative. */ }
       el.countEditor.hidden = true; el.countBrowser.hidden = false; render();
       const offline = !isBrowserOnline() ? '目前離線；' : '';
-      message(offline + (data.receiptId ? '清點已保存在這支手機，正在背景同步；可以處理下一包。'
-        : '例外紅包已保存在這支手機；取得 E 編號前請隔離這包，可先處理其他包。') +
-        ' 只有顯示「已同步」才代表已進入 Google Sheet。', 'success');
+      message(offline + (data.receiptId ? '已保存，背景同步中。可繼續下一包。'
+        : '已保存；取得 E 編號前請隔離這包。'), 'success');
     } finally { busy = false; controls(); render(); }
     kickQueue();
   }

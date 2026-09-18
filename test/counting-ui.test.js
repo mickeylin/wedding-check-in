@@ -77,10 +77,11 @@ test('清點先安全保存在手機並立即回清單，背景回應不阻止�
 
   assert.equal(f.get('countEditor').hidden, true);
   assert.equal(f.get('countBrowser').hidden, false);
+  assert.equal(f.get('countQueueSection').hidden, false);
   assert.equal(f.get('countRecords').children[0].disabled, true, '同一包待同步時仍需防止重複清點');
   assert.equal(f.get('countRecords').children[1].disabled, false, '背景同步不應阻止清點其他包');
   assert.match([...f.localStorage.values()].join(''), /req-1/);
-  assert.match(f.get('countStatus').textContent, /保存在這支手機/);
+  assert.match(f.get('countStatus').textContent, /已保存/);
 });
 
 test('清點模式載入最新清單，署名預填，背景成功後才標示已同步', async () => {

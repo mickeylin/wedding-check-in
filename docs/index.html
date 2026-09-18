@@ -19,7 +19,6 @@
   <main class="layout">
     <details id="settingsPanel" class="panel setup-panel" open>
       <summary id="settingsTitle">登入與設定 <span id="settingsHint">開始前請先登入</span></summary>
-      <p class="setup-help">網址與姓名會保留在這台裝置；重新開啟分頁時可能需要再次登入。更新名單也可在此操作。</p>
 
       <label for="apiUrl">Apps Script API URL</label>
       <input id="apiUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/.../exec">
@@ -41,13 +40,12 @@
     </nav>
     <section id="countingPanel" class="panel counting-panel" aria-labelledby="countingTitle" hidden>
       <h2 id="countingTitle">紅包清點</h2>
-      <p>依袋上編號找紅包；先安全保存在手機並背景同步，顯示「已同步」才算進入帳本。</p>
       <div class="button-row">
         <button id="countRefresh" type="button" class="secondary-button">重新載入清單</button>
         <button id="countException" type="button">例外狀況／新增一包</button>
       </div>
       <p id="countStatus" role="status" aria-live="polite"></p>
-      <section class="count-queue" aria-label="清點同步">
+      <section id="countQueueSection" class="count-queue" aria-label="清點同步" hidden>
         <div class="section-header">
           <p id="countQueueSummary">沒有待同步清點</p>
           <button id="countRetry" class="secondary-button compact-button" type="button" hidden>立即重試</button>
@@ -68,7 +66,6 @@
             <option value="署名不同／代送">署名不同／代送</option>
             <option value="無法確認">無法確認送禮人／金額有疑問</option>
           </select>
-          <p class="sync-help">署名不同或代送可直接修改目前這包；真正多了一包，請用「例外狀況／新增一包」。</p>
           <label for="countSignature">紅包署名</label>
           <input id="countSignature" maxlength="120" autocomplete="off">
           <label for="countAmount">金額（未知請留白）</label>
@@ -120,7 +117,6 @@
       <div class="section-header">
         <div>
           <h2 id="lookupTitle">用姓名找賓客</h2>
-          <p>輸入姓名／稱呼，或直接選分類。</p>
         </div>
       </div>
 
@@ -148,7 +144,7 @@
       <div id="lookupResults" class="lookup-results" aria-live="polite"></div>
     </section>
 
-    <section class="panel sync-panel" aria-labelledby="syncTitle">
+    <section id="giftSyncPanel" class="panel sync-panel" aria-labelledby="syncTitle" hidden>
       <div class="section-header">
         <div>
           <h2 id="syncTitle">紅包同步</h2>
@@ -156,12 +152,11 @@
         </div>
         <button id="retryGiftQueueButton" class="secondary-button compact-button" type="button">立即重試</button>
       </div>
-      <p class="sync-help">看到「已保存在手機」就能處理下一位；「已同步」才代表資料已進入 Google Sheet。</p>
       <details id="queueDetails"><summary>查看同步紀錄</summary>
       <ol id="giftQueueList" class="sync-list" aria-live="polite"></ol></details>
       <button id="clearCompletedGiftQueueButton" class="secondary-button" type="button" hidden>清除完成紀錄</button>
     </section>
-    <details class="panel history-panel"><summary>最近操作</summary><ol id="recentList" class="recent-list"></ol></details>
+    <details class="panel history-panel" hidden><summary>最近操作</summary><ol id="recentList" class="recent-list"></ol></details>
   </main>
 
   <div
@@ -184,7 +179,7 @@
       <button id="receiveButton" type="button" hidden>收到紅包</button>
       <button id="cancelReceiptButton" class="secondary-button" type="button" hidden>撤銷誤收件</button>
       <button id="nextGuestButton" class="secondary-button" type="button">下一位</button>
-      <details class="timing-details">
+      <details class="timing-details" hidden>
         <summary>查看本次耗時</summary>
         <p id="timingStatus">尚無量測資料</p>
       </details>
@@ -194,8 +189,8 @@
   <!-- Update the content-hash version when changing each local asset. -->
   <script src="./checkin-gate.js?v=5bdec7e233a6"></script>
   <script src="./gift-queue.js?v=610add030021"></script>
-  <script src="./app.js?v=f99ac60c1a93"></script>
+  <script src="./app.js?v=7847a9c58ff0"></script>
   <script src="./count-queue.js?v=e9c5a9cff383"></script>
-  <script src="./counting.js?v=5ceed5f503f9"></script>
+  <script src="./counting.js?v=77f60f3cea66"></script>
 </body>
 </html>

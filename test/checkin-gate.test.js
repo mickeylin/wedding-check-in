@@ -40,3 +40,13 @@ test('前端設定移除站台且先載入 gate 與 queue 再載入 app', () => 
   assert.ok(html.includes('id="checkinModal"'));
   assert.ok(html.includes('id="nextGuestButton"'));
 });
+
+test('現場主畫面預設隱藏診斷與空白同步區塊', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'docs', 'index.html'), 'utf8');
+
+  assert.match(html, /id="giftSyncPanel"[^>]*hidden/);
+  assert.match(html, /id="countQueueSection"[^>]*hidden/);
+  assert.match(html, /class="timing-details" hidden/);
+  assert.match(html, /class="panel history-panel" hidden/);
+  assert.doesNotMatch(html, /class="setup-help"|class="sync-help"/);
+});

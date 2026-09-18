@@ -74,10 +74,12 @@ test('掃描查詢不等待相機 stop，下一位重用串流且手動停止仍
 
 test('收件先保存手機並立刻允許下一位；背景成功後才顯示撤銷', async () => {
   const f = loadUi();
+  assert.equal(f.nodes.get('#giftSyncPanel').hidden, true);
   await f.ui.query('G001');
   let resolve;
   f.context.jsonpRequest = (settings, request) => { f.requests.push(request); return new Promise(done => { resolve = done; }); };
   await f.ui.mutate('receive');
+  assert.equal(f.nodes.get('#giftSyncPanel').hidden, false);
   const pending = f.ui.sync();
   assert.equal(f.nodes.get('#nextGuestButton').disabled, false);
   assert.match(f.nodes.get('#checkinModalMessage').textContent, /保存在這支手機/);

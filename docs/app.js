@@ -16,6 +16,7 @@ const elements = {
   guestFacts: document.querySelector('#guestFacts'),
   guestTable: document.querySelector('#guestTable'),
   guestCode: document.querySelector('#guestCode'),
+  giftSyncPanel: document.querySelector('#giftSyncPanel'),
   queueDetails: document.querySelector('#queueDetails'),
   apiUrl: document.querySelector('#apiUrl'),
   pin: document.querySelector('#pin'),
@@ -656,6 +657,7 @@ function queueStatusLabel(item) {
 function renderGiftQueue() {
   if (!elements.giftQueueSummary || !elements.giftQueueList || !giftQueueModel) return;
   const summary = giftQueueModel.summary(giftQueue);
+  elements.giftSyncPanel.hidden = giftQueueStorageAvailable && !summary.pending && !summary.attention;
   if (summary.attention || !giftQueueStorageAvailable) elements.queueDetails.open = true;
   const offlinePrefix = isBrowserOnline() ? '' : '目前離線；';
   if (!giftQueueStorageAvailable) {
@@ -671,7 +673,7 @@ function renderGiftQueue() {
   elements.retryGiftQueueButton.disabled = !giftQueueStorageAvailable || !summary.pending || !!giftQueueSyncPromise;
   elements.clearCompletedGiftQueueButton.hidden = !summary.completed;
 
-  const visible = giftQueue.slice(-12).reverse();
+  const visible = giftQueue.filter(item => !['synced', 'resolved', 'cancelled'].includes(item.status)).slice(-12).reverse();
   elements.giftQueueList.innerHTML = visible.map(item => {
     const tone = item.status === 'attention' ? 'attention'
       : ['synced', 'resolved', 'cancelled'].includes(item.status) ? 'synced' : 'pending';
