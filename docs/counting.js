@@ -3,8 +3,9 @@
 (() => {
   const ids = ['receptionMode', 'countingMode', 'countingPanel', 'receptionScanner', 'receptionLookup',
     'countRefresh', 'countException', 'countStatus', 'countRetry', 'countQueueSection', 'countQueueSummary', 'countQueueList',
-    'countEditor', 'countEditorTitle', 'countReceiptInfo', 'countFields', 'countGuestId', 'countType',
-    'countSignature', 'countAmount', 'countNotes', 'countReason', 'countComplete', 'countHold',
+    'countEditor', 'countEditorTitle', 'countReceiptInfo', 'countFields', 'countGuestGroup', 'countGuestId',
+    'countType', 'countSignature', 'countAmount', 'countNotesLabel', 'countNotes', 'countReasonGroup',
+    'countReason', 'countFormError', 'countComplete', 'countHold',
     'countClose', 'countBrowser', 'countSearch', 'countFilter', 'countSummary', 'countRecords'];
   const el = Object.fromEntries(ids.map(id => [id, document.querySelector('#' + id)]));
   const DRAFT_STORAGE = 'wedding-gift-count-draft-v1';
@@ -57,6 +58,24 @@
     }
     el.countGuestId.disabled = !!(selected && selected.guestId);
   }
+  function clearFormError() {
+    el.countFormError.textContent = ''; el.countFormError.hidden = true;
+    [el.countGuestId, el.countType, el.countSignature, el.countAmount, el.countNotes, el.countReason]
+      .forEach(field => field.setAttribute('aria-invalid', 'false'));
+  }
+  function fieldError(text, field) {
+    el.countFormError.textContent = text; el.countFormError.hidden = false;
+    if (field) {
+      field.setAttribute('aria-invalid', 'true'); field.focus();
+      if (typeof field.scrollIntoView === 'function') field.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+  function configureForm(record) {
+    el.countGuestGroup.hidden = !!(record && record.guestId);
+    el.countReasonGroup.hidden = !(record && record.state === '已清點');
+    el.countNotesLabel.textContent = '備註（選填）';
+    clearFormError();
+  }
   function open(record, restored) {
     if (record && queueModel.findForReceipt(queue, record.receiptId)) {
       message('這包已有待同步清點，請先處理其他包。', 'error'); return;
@@ -67,6 +86,8 @@
       ? { ...record, signature: record.signature || record.displayName, reason: '' }
       : { guestId: '', signature: '', amount: '', exceptionType: '名單外', notes: '', reason: '' } };
     fill(draft.values);
+    configureForm(record);
+    message('');
     el.countEditor.hidden = false; el.countBrowser.hidden = true;
     el.countEditorTitle.textContent = record
       ? (record.state === '已清點' ? '更正清點：' : '清點：') + (record.envelopeCode || record.guestId)
@@ -76,7 +97,7 @@
         + (record.countedBy ? '\n上次清點：' + record.countedBy + ' ' + record.countedAt : '')
       : '新增代表另一包實體紅包。同步成功取得 E 編號前，請將這包隔離。';
     controls(); el.countEditorTitle.focus();
-    try { persistDraft(); } catch (err) { message('無法保留草稿；請勿關閉分頁。', 'error'); }
+    try { persistDraft(); } catch (err) { fieldError('無法保留草稿；請勿關閉分頁。'); }
   }
   function render() {
     const query = el.countSearch.value.trim().toLowerCase();
@@ -174,20 +195,32 @@
   async function save(state) {
     if (busy) return;
     const value = fields();
-    if (value.amount && !/^\d{1,9}(\.\d{1,2})?$/.test(value.amount)) { message('金額需為非負數，最多九位整數及兩位小數。', 'error'); return; }
-    if (state === '已清點' && (!value.signature || value.amount === '')) { message('請填署名與金額；未知金額請留白並選待核對。', 'error'); return; }
-    if (state === '待核對' && !value.notes) { message('請填待核對原因。', 'error'); return; }
-    if (!selected && !value.exceptionType) { message('新增紅包請選例外狀況。', 'error'); return; }
-    if (!selected && value.exceptionType === '多包' && !value.guestId) { message('第二包需填原賓客編號。', 'error'); return; }
-    if (selected && selected.state === '已清點' && !value.reason) { message('請填更正原因。', 'error'); return; }
+    clearFormError();
+    el.countNotesLabel.textContent = state === '待核對' ? '待核對原因（必填）' : '備註（選填）';
+    if (value.amount && !/^\d{1,9}(\.\d{1,2})?$/.test(value.amount)) {
+      fieldError('金額需為非負數，最多九位整數及兩位小數。', el.countAmount); return;
+    }
+    if (state === '已清點' && !value.signature) { fieldError('請填紅包署名。', el.countSignature); return; }
+    if (state === '已清點' && value.amount === '') {
+      fieldError('請填金額；未知金額請改選「記錄為待核對」。', el.countAmount); return;
+    }
+    if (state === '待核對' && !value.notes) { fieldError('請填待核對原因。', el.countNotes); return; }
+    if (!selected && !value.exceptionType) { fieldError('新增紅包請選例外狀況。', el.countType); return; }
+    if (!selected && value.exceptionType === '多包' && !value.guestId) {
+      fieldError('第二包需填原賓客編號。', el.countGuestId); return;
+    }
+    if (selected && selected.state === '已清點' && !value.reason) {
+      fieldError('請填更正原因。', el.countReason); return;
+    }
     draft = { selected, values: value };
-    try { persistDraft(); } catch (err) { message('無法保存草稿，請先修復瀏覽器儲存空間。', 'error'); return; }
+    try { persistDraft(); } catch (err) { fieldError('無法保存草稿，請先修復瀏覽器儲存空間。'); return; }
     busy = true; controls();
     try {
-      if (!queueModel || !validateSettings()) return;
+      if (!queueModel) { fieldError('清點功能尚未完整載入，請重新整理頁面。'); return; }
+      if (!validateSettings()) { fieldError('請先完成登入與設定，再保存清點。'); return; }
       const settings = getSettings();
       const operator = readSessionOperator();
-      if (!settings.apiUrl || !operator) { message('請先完成登入，再保存清點。', 'error'); return; }
+      if (!settings.apiUrl || !operator) { fieldError('請先完成登入，再保存清點。'); return; }
       if (!window.confirm((selected ? '紅包 ' + (selected.envelopeCode || selected.guestId) : '新增一包例外紅包') +
         '\n署名：' + (value.signature || '待確認') + '\n金額：' + (value.amount === '' ? '未知' : value.amount) +
         '\n狀態：' + state + '\n確認保存到手機並背景同步？')) return;
@@ -196,10 +229,12 @@
       const added = queueModel.enqueue(queue, { requestId: createRequestId(), operator, apiUrl: settings.apiUrl,
         label: selected ? (selected.envelopeCode || selected.guestId) : (value.signature || '例外紅包'), data });
       if (!added.ok) {
-        message(added.reason === 'DUPLICATE_LOCAL' ? '這包已有待同步清點，請勿重複送出。' : '無法建立清點待辦。', 'error');
+        fieldError(added.reason === 'DUPLICATE_LOCAL' ? '這包已有待同步清點，請勿重複送出。' : '無法建立清點待辦。');
         return;
       }
-      if (!persistQueue(added.items)) return;
+      if (!persistQueue(added.items)) {
+        fieldError('手機無法保存清點資料，尚未送出。請檢查瀏覽器儲存空間。'); return;
+      }
       draft = null; selected = null;
       try { persistDraft(); } catch (err) { /* Queue is already durable and authoritative. */ }
       el.countEditor.hidden = true; el.countBrowser.hidden = false; render();
@@ -309,8 +344,9 @@
   el.countSearch.addEventListener('input', render);
   el.countFilter.addEventListener('change', render);
   el.countEditor.addEventListener('input', () => {
+    clearFormError();
     draft = { selected, values: fields() };
-    try { persistDraft(); } catch (err) { message('無法保留草稿；請勿關閉分頁。', 'error'); }
+    try { persistDraft(); } catch (err) { fieldError('無法保留草稿；請勿關閉分頁。'); }
   });
   el.countClose.addEventListener('click', () => {
     if (busy || !window.confirm('返回清單會放棄未儲存的清點內容，確定？')) return;

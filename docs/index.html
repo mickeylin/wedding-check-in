@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>婚禮禮金簿</title>
-  <link rel="stylesheet" href="./styles.css?v=ac13296ff6f3">
+  <link rel="stylesheet" href="./styles.css?v=fe722be42622">
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
@@ -56,8 +56,10 @@
         <h3 id="countEditorTitle" tabindex="-1"></h3>
         <p id="countReceiptInfo"></p>
         <fieldset id="countFields">
-          <label for="countGuestId">賓客編號（名單外或尚未確認可留白）</label>
-          <input id="countGuestId" autocomplete="off" autocapitalize="none" spellcheck="false">
+          <div id="countGuestGroup">
+            <label for="countGuestId">賓客編號（名單外或尚未確認可留白）</label>
+            <input id="countGuestId" autocomplete="off" autocapitalize="none" spellcheck="false">
+          </div>
           <label for="countType">例外狀況</label>
           <select id="countType">
             <option value="">一般清點</option>
@@ -70,10 +72,13 @@
           <input id="countSignature" maxlength="120" autocomplete="off">
           <label for="countAmount">金額（未知請留白）</label>
           <input id="countAmount" type="text" inputmode="decimal" placeholder="例如 3600" autocomplete="off">
-          <label for="countNotes">備註／待核對原因</label>
-          <textarea id="countNotes" rows="3" maxlength="500"></textarea>
-          <label for="countReason">更正原因（更正已清點資料必填）</label>
-          <input id="countReason" maxlength="500" autocomplete="off">
+          <label id="countNotesLabel" for="countNotes">備註（選填）</label>
+          <textarea id="countNotes" rows="3" maxlength="500" aria-errormessage="countFormError"></textarea>
+          <div id="countReasonGroup" hidden>
+            <label for="countReason">更正原因（必填）</label>
+            <input id="countReason" maxlength="500" autocomplete="off" aria-errormessage="countFormError">
+          </div>
+          <p id="countFormError" class="field-error" role="alert" aria-live="assertive" hidden></p>
           <div class="button-row">
             <button id="countComplete" type="submit">確認清點</button>
             <button id="countHold" type="button" class="secondary-button">記錄為待核對</button>
@@ -191,6 +196,6 @@
   <script src="./gift-queue.js?v=610add030021"></script>
   <script src="./app.js?v=7847a9c58ff0"></script>
   <script src="./count-queue.js?v=e9c5a9cff383"></script>
-  <script src="./counting.js?v=77f60f3cea66"></script>
+  <script src="./counting.js?v=235718f34ed4"></script>
 </body>
 </html>

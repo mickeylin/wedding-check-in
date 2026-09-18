@@ -8,9 +8,12 @@ function fixture(options = {}) {
   const nodes = new Map(), storage = options.storage || new Map(), localStorage = options.localStorage || new Map(), requests = [];
   let online = options.online !== false, operator = options.operator || '甲', serial = 0;
   function node() {
+    const attributes = new Map();
     return { value: '', hidden: false, disabled: false, textContent: '', children: [], dataset: {}, handlers: {},
       addEventListener(name, fn) { this.handlers[name] = fn; },
-      setAttribute() {}, focus() {}, replaceChildren() { this.children = []; },
+      setAttribute(name, value) { attributes.set(name, String(value)); },
+      getAttribute(name) { return attributes.get(name) || null; },
+      focus() {}, replaceChildren() { this.children = []; },
       append(...children) { this.children.push(...children); } };
   }
   const get = id => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); };
@@ -171,4 +174,29 @@ test('本機佇列儲存失敗時不送出清點請求', async () => {
   await f.edit(); await f.fire('countEditor', 'submit');
   assert.equal(f.requests.filter(r => r.action === 'countSave').length, 0);
   assert.match(f.get('countStatus').textContent, /儲存空間/);
+});
+
+test('待核對缺少原因時在表單內顯示錯誤，不必回到頁面上方', async () => {
+  const f = fixture();
+  await f.edit();
+
+  await f.fire('countHold');
+
+  assert.equal(f.get('countEditor').hidden, false);
+  assert.match(f.get('countFormError').textContent, /待核對原因/);
+  assert.equal(f.get('countNotes').getAttribute('aria-invalid'), 'true');
+});
+
+test('一般清點隱藏重複賓客編號與更正原因，已清點更正才顯示原因', async () => {
+  const normal = fixture();
+  await normal.edit();
+  assert.equal(normal.get('countGuestGroup').hidden, true);
+  assert.equal(normal.get('countReasonGroup').hidden, true);
+  assert.equal(normal.get('countNotesLabel').textContent, '備註（選填）');
+
+  const countedRecord = { ...normal.record, state: '已清點', signature: '測試賓客', amount: 3600 };
+  const correction = fixture({ records: [countedRecord] });
+  correction.get('countFilter').value = '';
+  await correction.edit();
+  assert.equal(correction.get('countReasonGroup').hidden, false);
 });
