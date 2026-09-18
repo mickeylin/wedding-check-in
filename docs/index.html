@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>婚禮禮金簿</title>
-  <link rel="stylesheet" href="./styles.css?v=fe722be42622">
+  <link rel="stylesheet" href="./styles.css?v=97f8a5896f70">
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
@@ -40,10 +40,6 @@
     </nav>
     <section id="countingPanel" class="panel counting-panel" aria-labelledby="countingTitle" hidden>
       <h2 id="countingTitle">紅包清點</h2>
-      <div class="button-row">
-        <button id="countRefresh" type="button" class="secondary-button">重新載入清單</button>
-        <button id="countException" type="button">例外狀況／新增一包</button>
-      </div>
       <p id="countStatus" role="status" aria-live="polite"></p>
       <section id="countQueueSection" class="count-queue" aria-label="清點同步" hidden>
         <div class="section-header">
@@ -53,6 +49,10 @@
         <ol id="countQueueList" class="sync-list" aria-live="polite"></ol>
       </section>
       <form id="countEditor" hidden>
+        <div id="countEditorNav" class="count-editor-nav">
+          <button id="countClose" type="button" class="secondary-button compact-button">← 返回紅包清單</button>
+          <span>清點內容</span>
+        </div>
         <h3 id="countEditorTitle" tabindex="-1"></h3>
         <p id="countReceiptInfo"></p>
         <fieldset id="countFields">
@@ -83,10 +83,19 @@
             <button id="countComplete" type="submit">確認清點</button>
             <button id="countHold" type="button" class="secondary-button">記錄為待核對</button>
           </div>
-          <button id="countClose" type="button" class="secondary-button">返回清單</button>
         </fieldset>
       </form>
       <div id="countBrowser">
+        <div id="countListHeader" class="count-list-header">
+          <div>
+            <span class="count-view-kicker">紅包清單</span>
+            <h3>選擇要清點的紅包</h3>
+          </div>
+          <div class="button-row">
+            <button id="countRefresh" type="button" class="secondary-button">重新載入</button>
+            <button id="countException" type="button">新增例外紅包</button>
+          </div>
+        </div>
         <label for="countSearch">紅包編號／賓客編號／姓名／署名</label>
         <input id="countSearch" type="search" placeholder="例如 g001 或 E001" autocomplete="off">
         <label for="countFilter">清點狀態</label>
@@ -196,6 +205,6 @@
   <script src="./gift-queue.js?v=610add030021"></script>
   <script src="./app.js?v=7847a9c58ff0"></script>
   <script src="./count-queue.js?v=e9c5a9cff383"></script>
-  <script src="./counting.js?v=235718f34ed4"></script>
+  <script src="./counting.js?v=de48f9c8e30e"></script>
 </body>
 </html>

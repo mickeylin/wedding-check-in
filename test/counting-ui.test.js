@@ -6,7 +6,7 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function fixture(options = {}) {
   const nodes = new Map(), storage = options.storage || new Map(), localStorage = options.localStorage || new Map(), requests = [];
-  let online = options.online !== false, operator = options.operator || '甲', serial = 0;
+  let online = options.online !== false, operator = options.operator || '甲', serial = 0, confirmCalls = 0;
   function node() {
     const attributes = new Map();
     return { value: '', hidden: false, disabled: false, textContent: '', children: [], dataset: {}, handlers: {},
@@ -30,7 +30,7 @@ function fixture(options = {}) {
         if (options.localStorageFailure) throw new Error('full'); localStorage.set(key, value);
       },
       removeItem: key => localStorage.delete(key)
-    }, confirm: () => true },
+    }, confirm: (...args) => { confirmCalls++; return options.confirm ? options.confirm(...args) : true; } },
     document: { querySelector: selector => get(selector.slice(1)), createElement: node },
     elements: { checkinModal: { hidden: true } },
     isBrowserOnline: () => online,
@@ -59,7 +59,8 @@ function fixture(options = {}) {
     get('countAmount').value = '3600';
   }
   return { get, fire, edit, context, requests, storage, localStorage, record,
-    offline: () => { online = false; }, operator: value => { operator = value; } };
+    offline: () => { online = false; }, operator: value => { operator = value; },
+    confirmCalls: () => confirmCalls };
 }
 
 test('清點先安全保存在手機並立即回清單，背景回應不阻止下一包', async () => {
@@ -199,4 +200,27 @@ test('一般清點隱藏重複賓客編號與更正原因，已清點更正才�
   correction.get('countFilter').value = '';
   await correction.edit();
   assert.equal(correction.get('countReasonGroup').hidden, false);
+});
+
+test('未修改清點內容時返回清單不跳確認', async () => {
+  const f = fixture();
+  await f.fire('countingMode');
+  await f.get('countRecords').children[0].handlers.click();
+
+  await f.fire('countClose');
+
+  assert.equal(f.confirmCalls(), 0);
+  assert.equal(f.get('countEditor').hidden, true);
+  assert.equal(f.get('countBrowser').hidden, false);
+});
+
+test('已修改清點內容時返回清單才詢問，取消後保留表單', async () => {
+  const f = fixture({ confirm: () => false });
+  await f.edit();
+
+  await f.fire('countClose');
+
+  assert.equal(f.confirmCalls(), 1);
+  assert.equal(f.get('countEditor').hidden, false);
+  assert.equal(f.get('countBrowser').hidden, true);
 });

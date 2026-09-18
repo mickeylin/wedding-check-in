@@ -50,3 +50,11 @@ test('現場主畫面預設隱藏診斷與空白同步區塊', () => {
   assert.match(html, /class="panel history-panel" hidden/);
   assert.doesNotMatch(html, /class="setup-help"|class="sync-help"/);
 });
+
+test('紅包清單與清點內容有各自的頁首與返回導覽', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'docs', 'index.html'), 'utf8');
+
+  assert.match(html, /id="countListHeader"/);
+  assert.match(html, /id="countEditorNav"/);
+  assert.match(html, /id="countClose"[^>]*>← 返回紅包清單</);
+});

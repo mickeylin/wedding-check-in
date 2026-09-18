@@ -461,7 +461,13 @@ body.guest-open { overflow: hidden; }
 #countFields > div > label { display: block; }
 .field-error { margin: 12px 0 0; padding: 10px 12px; border-radius: 7px; background: var(--error); color: var(--error-ink); font-weight: 700; }
 [aria-invalid="true"] { border-color: var(--error-ink); outline: 2px solid var(--error); }
-#countEditor { border: 2px solid var(--line); border-radius: 10px; padding: 16px; margin-top: 16px; }
+#countEditor { background: #fff; border: 2px solid var(--line); border-left: 5px solid var(--button); border-radius: 10px; padding: 16px; margin-top: 16px; box-shadow: 0 8px 22px #2f292114; }
+.count-list-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin: 8px 0 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.count-list-header h3 { margin: 4px 0 0; }
+.count-view-kicker { color: var(--muted); font-size: 13px; font-weight: 700; }
+.count-editor-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+.count-editor-nav span { color: var(--muted); font-size: 13px; font-weight: 700; }
+#countClose { margin: 0; width: auto; }
 textarea { width: 100%; font: inherit; font-size: 16px; border: 1px solid var(--line); border-radius: 7px; padding: 12px; resize: vertical; }
 #countSummary { margin-top: 12px; }
 #countReceiptInfo { white-space: pre-line; overflow-wrap: anywhere; }
@@ -475,4 +481,6 @@ textarea { width: 100%; font: inherit; font-size: 16px; border: 1px solid var(--
   .layout { padding: 10px; gap: 10px; }
   .checkin-modal { padding: 10px; align-items: end; }
   .checkin-modal-card { width: 100%; padding: 20px; max-height: calc(100dvh - 20px); }
+  .count-list-header { display: block; }
+  .count-list-header .button-row { margin-top: 12px; }
 }

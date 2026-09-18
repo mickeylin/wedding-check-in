@@ -13,6 +13,7 @@
   const RETRY_DELAYS = [5000, 15000, 30000];
   const queueModel = window.CountQueueModel;
   let records = [], queue = [], selected = null, draft = null;
+  let initialValues = null;
   let busy = false, reading = false, loaded = false, queueStorageAvailable = true;
   let syncPromise = null, retryTimer = null;
 
@@ -22,6 +23,16 @@
   const fields = () => ({ guestId: el.countGuestId.value.trim(), exceptionType: el.countType.value,
     signature: el.countSignature.value.trim(), amount: el.countAmount.value.trim(),
     notes: el.countNotes.value.trim(), reason: el.countReason.value.trim() });
+  const valuesFor = record => record
+    ? { guestId: String(record.guestId || ''), exceptionType: String(record.exceptionType || ''),
+      signature: String(record.signature || record.displayName || ''),
+      amount: record.amount === '' || record.amount == null ? '' : String(record.amount),
+      notes: String(record.notes || ''), reason: '' }
+    : { guestId: '', signature: '', amount: '', exceptionType: '名單外', notes: '', reason: '' };
+  const normalizedValues = value => Object.fromEntries(
+    ['guestId', 'exceptionType', 'signature', 'amount', 'notes', 'reason']
+      .map(key => [key, String(value && value[key] != null ? value[key] : '').trim()]));
+  const formChanged = () => JSON.stringify(normalizedValues(fields())) !== JSON.stringify(normalizedValues(initialValues));
   const queueSummary = () => queueModel ? queueModel.summary(queue) : { pending: 0, attention: 0, completed: 0 };
 
   function persistDraft() {
@@ -80,11 +91,13 @@
     if (record && queueModel.findForReceipt(queue, record.receiptId)) {
       message('這包已有待同步清點，請先處理其他包。', 'error'); return;
     }
-    if (!restored && draft && !window.confirm('放棄目前未儲存的清點內容？')) return;
+    if (!restored && draft && formChanged() && !window.confirm('放棄目前未儲存的清點內容？')) return;
     selected = record;
-    draft = restored || { selected: record, values: record
-      ? { ...record, signature: record.signature || record.displayName, reason: '' }
-      : { guestId: '', signature: '', amount: '', exceptionType: '名單外', notes: '', reason: '' } };
+    const baseline = valuesFor(record);
+    initialValues = normalizedValues(restored && restored.initialValues || baseline);
+    draft = restored
+      ? { ...restored, initialValues }
+      : { selected: record, values: baseline, initialValues };
     fill(draft.values);
     configureForm(record);
     message('');
@@ -235,7 +248,7 @@
       if (!persistQueue(added.items)) {
         fieldError('手機無法保存清點資料，尚未送出。請檢查瀏覽器儲存空間。'); return;
       }
-      draft = null; selected = null;
+      draft = null; selected = null; initialValues = null;
       try { persistDraft(); } catch (err) { /* Queue is already durable and authoritative. */ }
       el.countEditor.hidden = true; el.countBrowser.hidden = false; render();
       const offline = !isBrowserOnline() ? '目前離線；' : '';
@@ -345,13 +358,14 @@
   el.countFilter.addEventListener('change', render);
   el.countEditor.addEventListener('input', () => {
     clearFormError();
-    draft = { selected, values: fields() };
+    draft = { selected, values: fields(), initialValues };
     try { persistDraft(); } catch (err) { fieldError('無法保留草稿；請勿關閉分頁。'); }
   });
   el.countClose.addEventListener('click', () => {
-    if (busy || !window.confirm('返回清單會放棄未儲存的清點內容，確定？')) return;
-    draft = null; selected = null; persistDraft();
+    if (busy || (formChanged() && !window.confirm('尚未儲存修改，確定返回紅包清單？'))) return;
+    draft = null; selected = null; initialValues = null; persistDraft();
     el.countEditor.hidden = true; el.countBrowser.hidden = false; render();
+    el.countSearch.focus();
   });
 
   try {
