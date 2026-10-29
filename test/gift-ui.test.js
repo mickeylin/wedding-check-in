@@ -230,7 +230,7 @@ test('賓客結果集中顯示，下一位解除背景限制且不留下舊結�
   assert.equal(f.nodes.get('#guestFacts').hidden, false);
   assert.equal(f.nodes.get('#resultBox').hidden, true);
   assert.equal(f.nodes.get('main').inert, true);
-  assert.equal(f.nodes.get('#nextGuestButton').textContent, '完成接待／下一位');
+  assert.equal(f.nodes.get('#nextGuestButton').textContent, '下一位');
   await f.ui.next();
   assert.equal(f.nodes.get('main').inert, false);
   assert.equal(f.nodes.get('#checkinModal').hidden, true);

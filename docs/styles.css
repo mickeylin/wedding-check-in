@@ -495,3 +495,31 @@ textarea { width: 100%; font: inherit; font-size: 16px; border: 1px solid var(--
 .cake-quantities > div { min-width: 0; }
 #nextGuestButton { position: sticky; bottom: 0; margin-top: .9rem; box-shadow: 0 -4px 10px rgb(255 255 255 / 90%); }
 #receptionFeedback:not(:empty) { padding: .75rem; background: #fff4ce; border: 1px solid #dac57c; border-radius: .5rem; }
+
+/* Keep the common guest workflow to two actions and a next button. */
+.checkin-modal-card { background: #fff; }
+.checkin-modal-card.success, .checkin-modal-card.warn, .checkin-modal-card.error { background: #fff; }
+.guest-facts { grid-template-columns: 1fr 1fr; margin: 12px 0; gap: 10px; }
+.guest-facts > div { background: #f5f3ef; padding: 10px 12px; }
+#guestTable { font-size: 34px; line-height: 1.2; }
+#guestCode { font-size: 22px; line-height: 1.5; }
+#partySize { display: block; color: var(--muted); font-size: 13px; }
+.guest-envelope { padding: 10px 0 14px; }
+#checkinModalMessage { font-size: 14px; color: var(--muted); margin-top: 0; }
+.checkin-modal-card.error #checkinModalMessage { color: var(--error-ink); }
+.checkin-modal-card.warn #checkinModalMessage { color: #775500; }
+.cake-panel { margin-top: 0; padding-top: 12px; }
+.cake-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.cake-heading h3 { margin: 0; font-size: 16px; }
+#cakeGroupLabel { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; text-align: right; }
+#cakeStatus { font-weight: 600; font-size: 16px; margin-top: 6px; }
+.checkin-modal-card #receiveButton, .checkin-modal-card #cakeIssue { margin-top: 8px; }
+.checkin-modal-card #nextGuestButton { margin-top: 16px; background: #eeeae4; color: var(--ink); }
+.guest-details { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 6px; }
+.guest-details > summary { font-size: 14px; color: var(--muted); }
+.guest-details h3 { margin: 16px 0 6px; font-size: 15px; }
+.guest-details p, #cakeQuotaDetail { font-size: 14px; color: var(--muted); }
+.guest-details #partyMembers { font-weight: 400; }
+.checkin-modal-card .guest-details button { font-size: 14px; min-height: 44px; margin-top: 8px; }
+.party-alert { font-size: 14px; border-left: 3px solid #c69b32; padding-left: 8px; }
+#receptionFeedback:empty { display: none; }

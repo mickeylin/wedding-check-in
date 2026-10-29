@@ -486,8 +486,7 @@ function updateGiftButtons() {
   elements.receiveButton.disabled = busy;
   elements.cancelReceiptButton.disabled = busy;
   elements.nextGuestButton.disabled = busy;
-  elements.nextGuestButton.textContent = selectedGuest && selectedGuest.giftState === '未收件'
-    ? '完成接待／下一位' : '下一位';
+  elements.nextGuestButton.textContent = '下一位';
   if (!elements.checkinModal.hidden && [elements.receiveButton, elements.cancelReceiptButton]
     .some(button => button.hidden && document.activeElement === button)) {
     elements.nextGuestButton.focus();
@@ -506,8 +505,15 @@ function renderGiftResult(data) {
   selectedGuest = applyLocalGiftState(data);
   elements.guestTable.textContent = selectedGuest.tableNo || '未分配';
   elements.guestCode.textContent = selectedGuest.guestId;
-  const detail = ['紅包：' + selectedGuest.giftState,
-    selectedGuest.giftState === '未收件' ? '收到實體紅包後，請按「收到紅包」；只查桌號可直接下一位。' : selectedGuest.message || ''].join('\n');
+  const state = selectedGuest.giftState;
+  const shortStatus = {
+    '未收件': '尚未收紅包', '待清點': '已登記收紅包', '已清點': '已登記收紅包',
+    '待同步': '已保存在這支手機・待同步', '待核對': '紅包收件需核對', '清點待核對': '紅包清點需核對',
+    '例外收件': '請填紅包署名，取得編號後寫在袋上'
+  };
+  const needsAttention = ['待核對', '清點待核對'].includes(state);
+  const detail = (shortStatus[state] || '紅包：' + state) +
+    (needsAttention && selectedGuest.message ? '\n' + selectedGuest.message : '');
   const tone = selectedGuest.giftState === '未收件' ? 'neutral'
     : ['待同步', '清點待核對'].includes(selectedGuest.giftState) ? 'warn'
       : selectedGuest.giftState === '待核對' ? 'error' : 'success';

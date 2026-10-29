@@ -1,7 +1,8 @@
 /* Online cake issues and exception receipts retain the exact operation across
  * timeouts/reloads. Retrying never constructs a second request. */
 (() => {
-  const ids = ['partyMembers', 'partyNotes', 'cakePanel', 'cakeStatus', 'cakeRefresh',
+  const ids = ['partyMembers', 'partyNotes', 'partySize', 'partyAlert', 'guestDetails',
+    'cakeDetails', 'cakeGroupLabel', 'cakeQuotaDetail', 'cakePanel', 'cakeStatus', 'cakeRefresh',
     'cakeWestern', 'cakeChinese', 'cakeIssue', 'cakeHistory', 'receptionPending',
     'receptionPendingText', 'receptionRetry', 'receptionNotice', 'receptionFeedback', 'extraEnvelopePanel',
     'extraEnvelopeType', 'extraEnvelopeSignature', 'extraEnvelopeNotes', 'receiveExtraButton', 'unlistedEnvelope'];
@@ -29,7 +30,9 @@
       ? pending.label + '：結果尚未核對，請勿重複發餅或新增同一包。原操作人員：' + pending.operator
       : '裝置儲存異常，請使用紙本備援。';
     el.receptionRetry.disabled = busy || !pending;
-    el.cakeIssue.disabled = busy || !!pending || !storageAvailable || !cake || !isBrowserOnline();
+    const available = cake && (Math.max(0, cake.remaining.western || 0) + Math.max(0, cake.remaining.chinese || 0) > 0);
+    el.cakeIssue.disabled = busy || !!pending || !storageAvailable || !available || !isBrowserOnline();
+    el.cakeIssue.hidden = !!cake && !available;
     el.receiveExtraButton.disabled = busy || !!pending || !storageAvailable || !isBrowserOnline() || !selectedGuest;
     el.cakeRefresh.disabled = busy;
     el.cakeWestern.disabled = el.cakeChinese.disabled = busy;
@@ -38,9 +41,24 @@
   function renderCake(value) {
     cake = value;
     el.cakeHistory.replaceChildren();
-    if (!value) { controls(); return; }
+    if (!value) {
+      el.cakeGroupLabel.textContent = el.cakeQuotaDetail.textContent = '';
+      el.cakeWestern.value = el.cakeChinese.value = '0';
+      controls(); return;
+    }
     const quantity = value => value == null ? '未確認' : String(value);
-    el.cakeStatus.textContent = '共領：' + value.name + '（' + value.id + '）\n' +
+    el.cakeGroupLabel.textContent = value.name;
+    const remaining = ['western', 'chinese'].map((kind, index) => {
+      const label = index ? '中式' : '西式';
+      if (value.remaining[kind] == null) return label + '待確認';
+      if (value.remaining[kind] > 0) return label + ' ' + value.remaining[kind] + ' 盒可領';
+      return value.issued[kind] > 0 ? label + '已領' : '';
+    }).filter(Boolean);
+    const fullyIssued = value.remaining.western === 0 && value.remaining.chinese === 0 &&
+      value.issued.western + value.issued.chinese > 0;
+    el.cakeStatus.textContent = fullyIssued ? '喜餅已領取' : remaining.join('・') || '本組無需領餅';
+    el.cakeIssue.textContent = '發放喜餅';
+    el.cakeQuotaDetail.textContent = '共領：' + value.name + '（' + value.id + '）\n' +
       '整組配額：西式 ' + quantity(value.western) + '、中式 ' + quantity(value.chinese) + '\n' +
       '已領：西式 ' + value.issued.western + '、中式 ' + value.issued.chinese + '\n' +
       '尚可領：西式 ' + quantity(value.remaining.western) + '、中式 ' + quantity(value.remaining.chinese);
@@ -66,12 +84,13 @@
   }
   async function refresh() {
     const guest = selectedGuest, current = ++generation;
+    el.cakeGroupLabel.textContent = '';
     cake = null; controls();
     if (!guest || !guest.cakeGroupId) {
       el.cakeStatus.textContent = '尚未設定喜餅共領單位；請人工核對，不自動發放。'; return;
     }
     if (!isBrowserOnline()) {
-      el.cakeStatus.textContent = '目前離線，領餅狀態無法確認。由固定一人使用同一份紙本登記。'; return;
+      el.cakeStatus.textContent = '離線：請由固定一人用紙本登記領餅。'; return;
     }
     el.cakeStatus.textContent = '正在核對全家共領狀態…';
     try {
@@ -83,25 +102,35 @@
       if (!result.ok) throw new Error(result.message || '無法讀取喜餅狀態');
       renderCake(result.cake);
     } catch (err) {
-      if (generation === current) el.cakeStatus.textContent = '無法確認領餅狀態：' + messageOf(err) + '。請勿依舊畫面發餅。';
+      if (generation === current) {
+        el.cakeStatus.textContent = '無法確認領餅狀態：' + messageOf(err) + '。請先核對。';
+        el.guestDetails.open = true;
+      }
     }
   }
   function show(guest) {
     if (!guest) {
       shownGuestId = null; generation++; cake = null;
       el.partyMembers.textContent = el.partyNotes.textContent = el.receptionFeedback.textContent = '';
-      el.cakePanel.hidden = el.extraEnvelopePanel.hidden = true;
+      el.partySize.textContent = el.partyAlert.textContent = el.cakeGroupLabel.textContent = '';
+      el.partyAlert.hidden = true; el.guestDetails.open = false;
+      el.cakePanel.hidden = el.cakeDetails.hidden = el.extraEnvelopePanel.hidden = true;
       controls(); return;
     }
     const sameGuest = shownGuestId === guest.guestId;
     shownGuestId = guest.guestId;
-    el.cakePanel.hidden = !guest.guestId; el.extraEnvelopePanel.hidden = false;
+    el.cakePanel.hidden = el.cakeDetails.hidden = !guest.guestId; el.extraEnvelopePanel.hidden = false;
     el.partyMembers.textContent = (guest.members || '') + (guest.partySize ? '\n本組 ' + guest.partySize + ' 人' : '');
+    el.partySize.textContent = guest.partySize ? '本組 ' + guest.partySize + ' 人' : '';
     el.partyNotes.textContent = guest.notes || '';
+    el.partyAlert.textContent = String(guest.notes || '').split(/[；\n]/)
+      .filter(note => /兒童椅|嬰兒車|素食|撤.+椅|代領|核對|未確認|未知/.test(note)).join('；');
+    el.partyAlert.hidden = !el.partyAlert.textContent;
     // Ordinary envelope sync may re-render this same card while the operator
     // is entering cake quantities or labelling an E envelope. Preserve both.
     if (sameGuest) { controls(); return; }
     el.receptionFeedback.textContent = '';
+    el.guestDetails.open = !guest.guestId;
     el.extraEnvelopePanel.open = false;
     el.extraEnvelopeType.value = guest.guestId ? '多包' : '名單外';
     el.extraEnvelopeSignature.value = '';
