@@ -8,6 +8,33 @@
     'extraEnvelopeType', 'extraEnvelopeSignature', 'extraEnvelopeNotes', 'receiveExtraButton', 'unlistedEnvelope'];
   const el = Object.fromEntries(ids.map(id => [id, document.querySelector('#' + id)]));
   const KEY = 'wedding-reception-operation-v1';
+  const STATUS_TTL_MS = 10000;
+  const statusCache = new Map(), statusRequests = new Map(), statusVersions = new Map();
+  const statusKey = groupId => JSON.stringify([getSettings().apiUrl, readSessionOperator(), readSessionToken(), groupId]);
+  const version = key => statusVersions.get(key) || 0;
+  const copyCake = value => JSON.parse(JSON.stringify(value));
+  function rememberCake(value) {
+    const key = statusKey(value.id);
+    statusVersions.set(key, version(key) + 1);
+    statusCache.set(key, { value: copyCake(value), at: Date.now() });
+  }
+  function seed(values, createdAt) {
+    // The preview cache is memory-only and scoped to this API, operator and
+    // session. Old deployments without a login snapshot keep using cakeStatus.
+    if (!Array.isArray(values)) return;
+    const at = Math.min(Date.now(), Date.parse(createdAt) || 0);
+    values.forEach(value => {
+      if (!value?.id || !value.remaining || !value.issued) return;
+      const key = statusKey(value.id);
+      statusVersions.set(key, version(key) + 1);
+      statusCache.set(key, { value: copyCake(value), at });
+    });
+  }
+  function invalidateStatuses() {
+    statusCache.clear();
+    new Set([...statusVersions.keys(), ...statusRequests.keys()])
+      .forEach(key => statusVersions.set(key, version(key) + 1));
+  }
   let pending = null, busy = false, cake = null, generation = 0, storageAvailable = true, shownGuestId = null;
   const notice = text => {
     el.receptionNotice.textContent = text; el.receptionNotice.hidden = false;
@@ -82,27 +109,68 @@
     });
     controls();
   }
-  async function refresh() {
+  async function refresh(force = false) {
     const guest = selectedGuest, current = ++generation;
-    el.cakeGroupLabel.textContent = '';
-    cake = null; controls();
+    let key, requestedVersion;
     if (!guest || !guest.cakeGroupId) {
+      renderCake(null);
       el.cakeStatus.textContent = '尚未設定喜餅共領單位；請人工核對，不自動發放。'; return;
     }
     if (!isBrowserOnline()) {
+      renderCake(null);
       el.cakeStatus.textContent = '離線：請由固定一人用紙本登記領餅。'; return;
     }
-    el.cakeStatus.textContent = '正在核對全家共領狀態…';
     try {
+      key = statusKey(guest.cakeGroupId);
+      const cached = statusCache.get(key);
+      if (cached) {
+        renderCake(cached.value);
+        el.cakeGroupLabel.textContent = cached.value.name + '・上次狀態';
+        if (!force && Date.now() - cached.at < STATUS_TTL_MS) return;
+        el.cakeGroupLabel.textContent = cached.value.name + '・更新中';
+      } else {
+        renderCake(null);
+        el.cakeStatus.textContent = '正在核對全家共領狀態…';
+      }
       const ready = await ensureSession();
       const token = ready ? readSessionToken() : '';
       if (!token) throw new Error('請先完成登入');
-      const result = await jsonpRequest(getSettings(), { action: 'cakeStatus', guestId: guest.guestId, sessionToken: token });
       if (generation !== current || selectedGuest?.guestId !== guest.guestId) return;
-      if (!result.ok) throw new Error(result.message || '無法讀取喜餅狀態');
-      renderCake(result.cake);
+      // Re-authentication may just have seeded a new session's snapshot.
+      key = statusKey(guest.cakeGroupId);
+      const seeded = statusCache.get(key);
+      if (!force && seeded && Date.now() - seeded.at < STATUS_TTL_MS) {
+        renderCake(seeded.value);
+        el.cakeGroupLabel.textContent = seeded.value.name + '・上次狀態'; return;
+      }
+      requestedVersion = version(key);
+      let request = statusRequests.get(key);
+      if (!request || request.version !== requestedVersion) {
+        request = { version: requestedVersion };
+        request.promise = jsonpRequest(getSettings(), { action: 'cakeStatus', guestId: guest.guestId, sessionToken: token })
+          .then(result => {
+            if (!result.ok) throw new Error(result.message || '無法讀取喜餅狀態');
+            if (result.cake?.id !== guest.cakeGroupId) throw new Error('共領名單已變更，請重新登入更新名單');
+            if (version(key) === request.version) statusCache.set(key, { value: copyCake(result.cake), at: Date.now() });
+            return result;
+          }).finally(() => { if (statusRequests.get(key) === request) statusRequests.delete(key); });
+        statusRequests.set(key, request);
+      }
+      const result = await request.promise;
+      if (generation !== current || selectedGuest?.guestId !== guest.guestId) return;
+      if (version(key) !== requestedVersion) {
+        const latest = statusCache.get(key);
+        if (latest) renderCake(latest.value);
+        else await refresh(true);
+      } else renderCake(result.cake);
     } catch (err) {
       if (generation === current) {
+        const latest = key && statusCache.get(key);
+        if (requestedVersion != null && version(key) !== requestedVersion && latest) {
+          renderCake(latest.value); return;
+        }
+        if (key) statusCache.delete(key);
+        renderCake(null);
         el.cakeStatus.textContent = '無法確認領餅狀態：' + messageOf(err) + '。請先核對。';
         el.guestDetails.open = true;
       }
@@ -174,6 +242,7 @@
         // and network failures retain the request because a write may exist.
         if (['BAD_REQUEST', 'NOT_FOUND', 'UNKNOWN_QUOTA', 'ALREADY_ISSUED', 'ALREADY_CANCELLED'].includes(result.status)) {
           persist(null);
+          if (operation.action !== 'receiveExtra') invalidateStatuses();
         }
         throw new Error(result.message || '結果尚未確認');
       }
@@ -187,6 +256,7 @@
         // Keep the E code visible until the operator moves to the next guest.
         // A new lookup refreshes the envelope count from the server.
       } else {
+        rememberCake(result.cake);
         notice(operation.action === 'cakeCancel' ? '已更正發放紀錄。請依實體交付情況重新登記。'
           : repeated ? '原發餅操作已登記。請先核對是否已交付，勿再次拿餅。'
             : '發餅已確認：請交付西式 ' + operation.data.western + ' 盒、中式 ' + operation.data.chinese + ' 盒。');
@@ -195,9 +265,10 @@
       }
     } catch (err) {
       notice(messageOf(err) + (pending ? '。原操作仍保留，請按「核對原操作結果／重試」，勿重新發放。' : ''));
+      if (!pending && operation.action !== 'receiveExtra') await refresh(true);
     } finally { busy = false; controls(); }
   }
-  el.cakeRefresh.addEventListener('click', refresh);
+  el.cakeRefresh.addEventListener('click', () => refresh(true));
   el.cakeIssue.addEventListener('click', () => {
     const western = Number(el.cakeWestern.value), chinese = Number(el.cakeChinese.value);
     if (![western, chinese].every(n => Number.isSafeInteger(n) && n >= 0) || western + chinese < 1) {
@@ -225,6 +296,6 @@
     pending = JSON.parse(window.localStorage.getItem(KEY) || 'null');
     if (pending && (!pending.requestId || !pending.operator || !pending.apiUrl || !pending.action || !pending.data)) throw new Error('invalid operation');
   } catch (err) { storageAvailable = false; notice('待核對操作無法讀取，請人工核對後再使用。'); }
-  window.Reception = { show, isBusy: () => busy, refresh };
+  window.Reception = { show, isBusy: () => busy, refresh, seed };
   controls();
 })();

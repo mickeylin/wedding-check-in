@@ -5,6 +5,7 @@ const test = require('node:test');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function fixture({ local = new Map(), online = true, respond, operator = '甲', ensure } = {}) {
   const nodes = new Map(), calls = [];
+  const clock = { now: Date.now() };
   function node() {
     const handlers = {};
     return { value: '', textContent: '', hidden: false, disabled: false, children: [],
@@ -14,7 +15,8 @@ function fixture({ local = new Map(), online = true, respond, operator = '甲', 
   const get = key => { if (!nodes.has(key)) nodes.set(key, node()); return nodes.get(key); };
   const cake = { id: 'C1', name: '大伯家', western: 1, chinese: 1,
     issued: { western: 0, chinese: 0 }, remaining: { western: 1, chinese: 1 }, issues: [] };
-  const ctx = { document: { querySelector: get, createElement: node },
+  const ctx = { Date: class extends Date { static now() { return clock.now; } },
+    document: { querySelector: get, createElement: node },
     window: { localStorage: { getItem: k => local.get(k), setItem: (k, v) => local.set(k, v), removeItem: k => local.delete(k) },
       confirm: () => true, prompt: () => '誤登未交付', addEventListener() {} },
     selectedGuest: { ok: true, guestId: 'G1', members: '成哥、家人', partySize: 3, cakeGroupId: 'C1' },
@@ -25,7 +27,7 @@ function fixture({ local = new Map(), online = true, respond, operator = '甲', 
     jsonpRequest: async (settings, request) => { calls.push(request);
       return respond ? respond(request) : { ok: true, status: 'CAKE_SAVED', cake }; } };
   vm.runInNewContext(fs.readFileSync('docs/reception.js', 'utf8'), ctx);
-  return { ctx, get, local, calls, cake,
+  return { ctx, get, local, calls, cake, clock,
     show: async () => { ctx.window.Reception.show(ctx.selectedGuest); await tick(); },
     click: async key => { get(key).fire(); await tick(); } };
 }
@@ -37,6 +39,56 @@ test('只查詢不發餅，確認後才傳盒數並在視窗顯示交付提示',
   assert.equal(JSON.parse(f.calls[1].data).western, 1);
   assert.equal(f.calls[1].sessionToken, 'token');
   assert.match(f.get('#receptionFeedback').textContent, /發餅已確認/); assert.equal(f.local.size, 0);
+});
+
+test('同一共領家庭快速換卡時，共用尚未完成的狀態請求', async () => {
+  let finish;
+  const f = fixture({ respond: () => new Promise(resolve => { finish = resolve; }) });
+  await f.show();
+  f.ctx.window.Reception.show(null);
+  f.ctx.selectedGuest = { ...f.ctx.selectedGuest, guestId: 'G2' };
+  await f.show();
+  assert.equal(f.calls.length, 1);
+  finish({ ok: true, cake: f.cake }); await tick();
+  assert.match(f.get('#cakeStatus').textContent, /1 盒可領/);
+});
+
+test('登入快照立即顯示共領狀態，同家庭10秒內換卡不再往返API；手動更新仍讀伺服器', async () => {
+  const f = fixture();
+  f.ctx.window.Reception.seed([f.cake], new Date(f.clock.now).toISOString());
+  await f.show();
+  assert.equal(f.calls.length, 0); assert.match(f.get('#cakeStatus').textContent, /1 盒可領/);
+  assert.match(f.get('#cakeGroupLabel').textContent, /上次狀態/);
+  f.ctx.window.Reception.show(null); f.ctx.selectedGuest = { ...f.ctx.selectedGuest, guestId: 'G2' };
+  await f.show(); assert.equal(f.calls.length, 0);
+  await f.click('#cakeRefresh'); assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].action, 'cakeStatus');
+});
+
+test('過期快照先顯示並背景更新，舊查詢回應不能覆蓋已成功的發放結果', async () => {
+  let finish;
+  const issued = { id: 'C1', name: '大伯家', western: 1, chinese: 1,
+    issued: { western: 1, chinese: 1 }, remaining: { western: 0, chinese: 0 }, issues: [] };
+  const f = fixture({ respond: request => request.action === 'cakeStatus'
+    ? new Promise(resolve => { finish = resolve; }) : { ok: true, status: 'CAKE_SAVED', cake: issued } });
+  f.ctx.window.Reception.seed([f.cake], new Date(f.clock.now - 20000).toISOString());
+  await f.show();
+  assert.match(f.get('#cakeGroupLabel').textContent, /更新中/);
+  assert.match(f.get('#cakeStatus').textContent, /1 盒可領/);
+  await f.click('#cakeIssue'); assert.match(f.get('#cakeStatus').textContent, /已領取/);
+  finish({ ok: true, cake: f.cake }); await tick();
+  assert.match(f.get('#cakeStatus').textContent, /已領取/);
+  assert.equal(f.get('#cakeIssue').hidden, true);
+  f.ctx.window.Reception.show(null); f.ctx.selectedGuest = { ...f.ctx.selectedGuest, guestId: 'G2' };
+  await f.show(); assert.equal(f.calls.length, 2); assert.match(f.get('#cakeStatus').textContent, /已領取/);
+});
+
+test('不同API、操作人員或登入session不可沿用另一份共領快照', async () => {
+  for (const change of [f => { f.ctx.getSettings = () => ({ apiUrl: 'https://other.test/exec' }); },
+    f => { f.ctx.readSessionOperator = () => '乙'; }, f => { f.ctx.readSessionToken = () => 'new-token'; }]) {
+    const f = fixture(); f.ctx.window.Reception.seed([f.cake], new Date(f.clock.now).toISOString());
+    change(f); await f.show(); assert.equal(f.calls.length, 1);
+  }
 });
 test('逾時重整後禁止新發放，以原請求重試並提醒不要重發', async () => {
   const local = new Map();

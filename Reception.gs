@@ -36,6 +36,24 @@ function cakeRecords_(rows) {
   }));
 }
 
+// Read and validate a bounded table in one values request, rather than reading
+// its header separately and then loading the same cells again.
+function readCakeRows_(sheet, headers) {
+  const values = sheet.getRange(1, 1, Math.max(1, sheet.getLastRow()), headers.length).getValues();
+  if (headers.some((header, i) => values[0][i] !== header)) {
+    throw apiError_('CONFIG_ERROR', sheet.getName() + ' 欄位順序不符');
+  }
+  return values.slice(1);
+}
+
+function createCakeSnapshot_(ss) {
+  const groups = readCakeRows_(getRequiredSheet_(ss, 'CakeGroups'), CAKE_GROUP_HEADERS)
+    .filter(row => row[0]).map(row => ({ id: String(row[0]), name: String(row[1]), western: row[2], chinese: row[3] }));
+  if (new Set(groups.map(group => group.id)).size !== groups.length) throw apiError_('CONFIG_ERROR', '喜餅共領ID重複');
+  const records = cakeRecords_(readCakeRows_(getRequiredSheet_(ss, 'CakeLog'), CAKE_LOG_HEADERS));
+  return groups.map(group => cakeView_(group, records));
+}
+
 function cakeView_(group, records) {
   const relevant = records.filter(record => record.groupId === group.id);
   const ids = new Set(), cancelled = new Set();
@@ -67,15 +85,15 @@ function cakeView_(group, records) {
 
 function createCakeModule_(deps) {
   return { execute(input) {
-    const guest = deps.guest(input.guestId);
-    if (!guest || !guest.cakeGroupId) throw apiError_('NOT_FOUND', '賓客未設定喜餅共領單位');
     const execute = () => {
+      const guest = deps.guest(input.guestId);
+      if (!guest || !guest.cakeGroupId) throw apiError_('NOT_FOUND', '賓客未設定喜餅共領單位');
       const groups = deps.groups().filter(group => group.id === guest.cakeGroupId);
       if (groups.length !== 1) throw apiError_('CONFIG_ERROR', '找不到唯一喜餅共領單位');
       const records = deps.records(), group = groups[0];
-      const response = (status, record) => ({ ok: true, status, record,
-        cake: cakeView_(group, deps.records()) });
-      if (input.action === 'cakeStatus') return response('CAKE_STATUS');
+      const response = (status, record, currentRecords) => ({ ok: true, status, record,
+        cake: cakeView_(group, currentRecords || deps.records()) });
+      if (input.action === 'cakeStatus') return response('CAKE_STATUS', undefined, records);
       if (!/^[a-zA-Z0-9_-]{8,100}$/.test(input.requestId || '') || !input.operator) {
         throw apiError_('BAD_REQUEST', '缺少有效請求編號或操作人員');
       }
@@ -103,7 +121,7 @@ function createCakeModule_(deps) {
           || replay.originalId !== originalId || replay.reason !== reason) {
           throw apiError_('REQUEST_REUSED', '同一請求不可更換內容或人員');
         }
-        return response('CAKE_REPLAY', replay);
+        return response('CAKE_REPLAY', replay, records);
       }
       const view = cakeView_(group, records);
       if (action === '發放') {
@@ -126,18 +144,26 @@ function createCakeModule_(deps) {
 }
 
 function handleCakeApi_(payload, now) {
+  const started = Date.now();
   const session = verifySessionToken_(payload.sessionToken, now), ss = getSpreadsheet_();
-  const groups = requireGiftSchema_(ss, 'CakeGroups', CAKE_GROUP_HEADERS);
-  const log = requireGiftSchema_(ss, 'CakeLog', CAKE_LOG_HEADERS);
-  const rows = sheet => sheet.getDataRange().getValues().slice(1);
+  const groups = getRequiredSheet_(ss, 'CakeGroups');
+  const log = getRequiredSheet_(ss, 'CakeLog');
   const module = createCakeModule_({
     guest(id) {
-      const matches = rows(getRequiredSheet_(ss, 'Guests')).filter(row => String(row[0]) === id);
+      // Status display may use the trusted login index. Mutations always check
+      // the current guest association, quotas and ledger under the write lock.
+      if (payload.action === 'cakeStatus') {
+        const cached = findCachedGiftGuest_(id);
+        if (cached) return cached;
+      }
+      const matches = getRequiredSheet_(ss, 'Guests').getDataRange().getValues().slice(1)
+        .filter(row => String(row[0]) === id);
       if (matches.length > 1) throw apiError_('CONFIG_ERROR', '賓客ID重複');
       return matches.length ? guestRecordFromRow_(matches[0]) : null;
     },
-    groups: () => rows(groups).filter(row => row[0]).map(row => ({ id: String(row[0]), name: String(row[1]), western: row[2], chinese: row[3] })),
-    records: () => cakeRecords_(rows(log)),
+    groups: () => readCakeRows_(groups, CAKE_GROUP_HEADERS).filter(row => row[0])
+      .map(row => ({ id: String(row[0]), name: String(row[1]), western: row[2], chinese: row[3] })),
+    records: () => cakeRecords_(readCakeRows_(log, CAKE_LOG_HEADERS)),
     append(record) {
       log.appendRow([record.id, sheetText_(record.groupId), sheetText_(record.guestId), record.action,
         record.western, record.chinese, sheetText_(record.operator), now, record.requestId,
@@ -146,5 +172,7 @@ function handleCakeApi_(payload, now) {
     },
     uuid: () => Utilities.getUuid(), now: () => now.toISOString(), lock: createScriptLock_(10000)
   });
-  return module.execute(Object.assign({}, payload, { guestId: extractGuestId_(payload.guestId), operator: session.operator }));
+  const result = module.execute(Object.assign({}, payload, { guestId: extractGuestId_(payload.guestId), operator: session.operator }));
+  result.serverMs = Date.now() - started;
+  return result;
 }

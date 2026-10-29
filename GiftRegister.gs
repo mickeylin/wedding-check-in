@@ -96,7 +96,14 @@ function createGiftSnapshot_(ss) {
     }, giftStatus_(giftsByGuest[guest.guestId] || [])));
 
   cacheGiftGuests_(guests);
-  return { guests, snapshotCreatedAt: new Date().toISOString() };
+  const snapshot = { guests, snapshotCreatedAt: new Date().toISOString() };
+  if (typeof createCakeSnapshot_ === 'function') {
+    // Cake preview is optional: an unavailable cake table must not prevent
+    // reception login or envelope receipts. A later cake lookup fails closed.
+    try { snapshot.cakeSnapshot = createCakeSnapshot_(ss); }
+    catch (err) { snapshot.cakeSnapshotUnavailable = true; }
+  }
+  return snapshot;
 }
 
 function cacheGiftGuests_(guests) {

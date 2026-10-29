@@ -4,13 +4,13 @@ const vm = require('node:vm');
 const test = require('node:test');
 
 function fixture() {
-  let records = [], serial = 0, failAfterWrite = false, locked = false;
+  let records = [], serial = 0, failAfterWrite = false, locked = false, recordReads = 0;
   const ctx = {};
   vm.runInNewContext(['Code.gs', 'GiftRegister.gs', 'Reception.gs'].map(file => fs.readFileSync(file, 'utf8')).join('\n') +
     '\nthis.api = { createCakeModule_, cakeView_, guestRecordFromRow_ };', ctx);
   const group = { id: 'C1', name: '共領家庭', western: 1, chinese: 1 };
   const deps = { guest: id => ['G1', 'G2'].includes(id) ? { guestId: id, cakeGroupId: 'C1' } : null,
-    groups: () => [group], records: () => records.map(row => ({ ...row })),
+    groups: () => [group], records: () => { recordReads++; return records.map(row => ({ ...row })); },
     append(record) { assert.equal(locked, true); records.push({ ...record });
       if (failAfterWrite) { failAfterWrite = false; throw new Error('flush timeout'); } },
     uuid: () => 'issue-' + ++serial, now: () => '2026-10-29T00:00:00Z',
@@ -18,8 +18,14 @@ function fixture() {
   const api = ctx.api.createCakeModule_(deps);
   const call = (action, data = {}, options = {}) => api.execute({ action, data, guestId: 'G1',
     requestId: 'request-0001', operator: '甲', ...options });
-  return { call, group, records, parse: ctx.api.guestRecordFromRow_, fail: () => { failAfterWrite = true; } };
+  return { call, group, records, reads: () => recordReads, parse: ctx.api.guestRecordFromRow_, fail: () => { failAfterWrite = true; } };
 }
+
+test('唯讀共領狀態只讀一次發放帳本，不重讀同一份資料', () => {
+  const f = fixture();
+  f.call('cakeStatus');
+  assert.equal(f.reads(), 1);
+});
 
 test('不同QR共用喜餅配額，後到手機不能再領；單純查詢不發放', () => {
   const f = fixture();

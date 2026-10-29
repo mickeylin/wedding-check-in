@@ -364,6 +364,7 @@ function ensureSession() {
       }
       window.sessionStorage.setItem(SESSION_OPERATOR_STORAGE_KEY, data.operator || settings.operator);
       if (Array.isArray(data.guests)) applyGuestSnapshot(data.guests);
+      if (window.Reception) window.Reception.seed(data.cakeSnapshot, data.snapshotCreatedAt);
       if (giftQueue.length) resumeGiftQueueAfterLogin();
       elements.settingsPanel.open = false;
       updateConnectionStatus();
