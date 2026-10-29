@@ -38,7 +38,7 @@ function loadUi(options = {}) {
   nodes.get('#apiUrl').value = 'https://example.test/exec';
   nodes.get('#operator').value = '工作人員';
   const requests = [];
-  const guest = { ok: true, status: 'GUEST_FOUND', guestId: 'G001', displayName: '測試賓客', tableNo: '3', giftState: '未收件', canCancel: false };
+  const guest = { ok: true, status: 'GUEST_FOUND', guestId: 'G001', displayName: '測試賓客', category: '湖畔咖啡', tableNo: '3', giftState: '未收件', canCancel: false };
   context.jsonpRequest = async (settings, request) => { requests.push(request); return guest; };
   return { context, nodes, requests, guest, ui: context.ui, timeoutDelays, appendedScripts };
 }
@@ -49,7 +49,7 @@ test('QR 查詢只送 guest；按下一位不新增紅包', async () => {
   assert.equal(f.requests.length, 1);
   assert.equal(f.requests[0].action, 'guest');
   assert.equal(f.nodes.get('#receiveButton').hidden, false);
-  assert.equal(f.nodes.get('#guestTable').textContent, '3');
+  assert.equal(f.nodes.get('#guestTable').textContent, '湖畔咖啡');
   await f.ui.next();
   assert.equal(f.requests.length, 1);
   assert.equal(f.nodes.get('#receiveButton').hidden, true);
@@ -315,7 +315,7 @@ test('已登入快照讓賓客查詢立即顯示，不等待 Apps Script 往返'
   await f.ui.query('g001');
 
   assert.equal(f.nodes.get('#checkinModal').hidden, false);
-  assert.equal(f.nodes.get('#guestTable').textContent, '3');
+  assert.equal(f.nodes.get('#guestTable').textContent, '湖畔咖啡');
   assert.equal(f.requests.length, 0, '顯示賓客不應等待遠端請求');
   assert.match(f.nodes.get('#timingStatus').textContent, /本機快照/);
 });

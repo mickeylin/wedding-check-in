@@ -242,7 +242,7 @@ async function loadGuest(guestId, operationStarted = Date.now(), sessionMs = 0) 
       renderGiftResult(data);
       return;
     }
-    showResult('查詢中', guestId + '：正在查詢桌號與紅包狀態。', 'neutral');
+    showResult('查詢中', guestId + '：正在查詢分類與紅包狀態。', 'neutral');
 
     const data = await jsonpGuest(settings, guestId, requestId);
     rememberGuest(data);
@@ -274,7 +274,7 @@ async function searchGuests() {
   const query = elements.lookupQuery.value.trim();
   const category = elements.lookupCategory.value.trim();
   if (!query && !category) {
-    elements.lookupStatus.textContent = '請輸入姓名或選擇關係分類。';
+    elements.lookupStatus.textContent = '請輸入姓名或選擇分類。';
     elements.lookupResults.replaceChildren();
     return;
   }
@@ -504,7 +504,7 @@ function renderGiftResult(data) {
     return;
   }
   selectedGuest = applyLocalGiftState(data);
-  elements.guestTable.textContent = selectedGuest.tableNo || '未分配';
+  elements.guestTable.textContent = selectedGuest.category || '未填寫';
   elements.guestCode.textContent = selectedGuest.guestId;
   const state = selectedGuest.giftState;
   const shortStatus = {
@@ -928,7 +928,7 @@ function renderLookupResults(data) {
     return;
   }
   if (result.status === 'EMPTY_LOOKUP') {
-    elements.lookupStatus.textContent = result.message || '請輸入姓名或選擇關係分類。';
+    elements.lookupStatus.textContent = result.message || '請輸入姓名或選擇分類。';
     return;
   }
   const results = Array.isArray(result.results) ? result.results : [];
@@ -938,18 +938,16 @@ function renderLookupResults(data) {
   }
   elements.lookupStatus.textContent = result.hasMore
     ? '找到前 ' + results.length + ' 筆，請再縮小分類或輸入姓名。'
-    : '找到 ' + results.length + ' 筆，請確認姓名與關係分類。';
+    : '找到 ' + results.length + ' 筆，請確認姓名與分類。';
   results.forEach(guest => {
     const card = document.createElement('article');
     card.className = 'lookup-card';
-    const categoryText = guest.category ? '關係分類 ' + guest.category : '關係分類未填寫';
-    const tableText = guest.tableNo ? '桌號 ' + guest.tableNo : '桌號尚未分配';
+    const categoryText = guest.category ? '分類 ' + guest.category : '分類未填寫';
     const checkInText = '點選查看最新紅包狀態';
     card.innerHTML = [
       '<div class="lookup-card-title">' + escapeHtml(guest.displayName || '未命名賓客') + '</div>',
       '<div class="lookup-card-meta">',
       '<span>' + escapeHtml(categoryText) + '</span>',
-      '<span>' + escapeHtml(tableText) + '</span>',
       '<span>' + escapeHtml(checkInText) + '</span>',
       '</div>'
     ].join('');
@@ -958,7 +956,7 @@ function renderLookupResults(data) {
     const button = document.createElement('button');
     button.type = 'button';
     button.disabled = !guest.guestId;
-    button.textContent = guest.guestId ? '查看桌號／紅包' : '缺少賓客 ID';
+    button.textContent = guest.guestId ? '查看分類／紅包' : '缺少賓客 ID';
     button.addEventListener('click', () => {
       queryGuest(guest.guestId, { source: 'lookup' });
     });
