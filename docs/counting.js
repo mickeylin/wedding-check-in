@@ -1,7 +1,7 @@
 /* Mobile counting is local-first. A confirmed form is durably queued on this
  * device, then sent in the background with one immutable request id. */
 (() => {
-  const ids = ['receptionMode', 'countingMode', 'countingPanel', 'receptionScanner', 'receptionLookup',
+  const ids = ['receptionMode', 'countingMode', 'countingPanel', 'receptionScanner', 'receptionLookup', 'unlistedEnvelope',
     'countRefresh', 'countException', 'countStatus', 'countRetry', 'countQueueSection', 'countQueueSummary', 'countQueueList',
     'countEditor', 'countEditorTitle', 'countReceiptInfo', 'countFields', 'countGuestGroup', 'countGuestId',
     'countType', 'countSignature', 'countAmount', 'countNotesLabel', 'countNotes', 'countReasonGroup',
@@ -340,6 +340,7 @@
     }
     el.countingPanel.hidden = !counting;
     el.receptionScanner.hidden = counting; el.receptionLookup.hidden = counting;
+    el.unlistedEnvelope.hidden = counting;
     el.countingMode.setAttribute('aria-pressed', String(counting));
     el.receptionMode.setAttribute('aria-pressed', String(!counting));
     el.countingMode.className = counting ? '' : 'secondary-button';

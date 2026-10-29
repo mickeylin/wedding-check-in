@@ -230,7 +230,7 @@ test('賓客結果集中顯示，下一位解除背景限制且不留下舊結�
   assert.equal(f.nodes.get('#guestFacts').hidden, false);
   assert.equal(f.nodes.get('#resultBox').hidden, true);
   assert.equal(f.nodes.get('main').inert, true);
-  assert.equal(f.nodes.get('#nextGuestButton').textContent, '只查桌號／下一位');
+  assert.equal(f.nodes.get('#nextGuestButton').textContent, '完成接待／下一位');
   await f.ui.next();
   assert.equal(f.nodes.get('main').inert, false);
   assert.equal(f.nodes.get('#checkinModal').hidden, true);
@@ -318,6 +318,16 @@ test('已登入快照讓賓客查詢立即顯示，不等待 Apps Script 往返'
   assert.equal(f.nodes.get('#guestTable').textContent, '3');
   assert.equal(f.requests.length, 0, '顯示賓客不應等待遠端請求');
   assert.match(f.nodes.get('#timingStatus').textContent, /本機快照/);
+});
+
+test('同行者本名與別名能找到同一張卡，分類由新名單產生', () => {
+  const f = loadUi();
+  f.ui.snapshot([{ ...f.guest, displayName: '測試家庭', members: '同行甲、同行乙', category: '女方親戚' },
+    { ...f.guest, guestId: 'G2', displayName: '朋友', category: '麥當勞' }]);
+  assert.equal(f.ui.searchSnapshot('同行甲', '').results[0].guestId, 'G001');
+  assert.equal(f.ui.searchSnapshot('同行乙', '').results[0].guestId, 'G001');
+  assert.equal(f.ui.searchSnapshot('', '麥當勞').results.length, 1);
+  assert.ok(f.nodes.get('#lookupCategory').children.some(option => option.value === '麥當勞'));
 });
 
 test('姓名與分類查找也使用登入快照', () => {

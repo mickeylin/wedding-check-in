@@ -3,7 +3,7 @@ const GIFT_HEADERS = ['收件ID', '賓客ID', '顯示姓名', '紅包署名', '�
   '收件人員', '收件時間', '清點人員', '清點時間', '備註', '收件請求ID',
   '撤銷人員', '撤銷時間', '撤銷請求ID', '紅包編號', '例外類型'];
 const GIFT_AUDIT_HEADERS = ['時間', '操作人員', '動作', '收件ID', '賓客ID', '變更內容'];
-const GIFT_GUEST_CACHE_KEY = 'GIFT_GUEST_SNAPSHOT_V1';
+const GIFT_GUEST_CACHE_KEY = 'GIFT_GUEST_SNAPSHOT_V2';
 
 function setupGiftRegister_(ss) {
   const gifts = requireGiftSchema_(ss, 'Gifts', GIFT_HEADERS, true);
@@ -91,7 +91,8 @@ function createGiftSnapshot_(ss) {
       guestId: guest.guestId,
       displayName: guest.displayName,
       category: guest.category,
-      tableNo: guest.tableNo
+      tableNo: guest.tableNo, members: guest.members, partySize: guest.partySize,
+      cakeGroupId: guest.cakeGroupId, notes: guest.notes
     }, giftStatus_(giftsByGuest[guest.guestId] || [])));
 
   cacheGiftGuests_(guests);
@@ -105,7 +106,8 @@ function cacheGiftGuests_(guests) {
       guestId: guest.guestId,
       displayName: guest.displayName,
       category: guest.category,
-      tableNo: guest.tableNo
+      tableNo: guest.tableNo, members: guest.members, partySize: guest.partySize,
+      cakeGroupId: guest.cakeGroupId, notes: guest.notes
     };
   });
   safeCachePut_(GIFT_GUEST_CACHE_KEY, JSON.stringify(guestIndex), SCRIPT_CACHE_MAX_TTL_SECONDS);
@@ -134,7 +136,8 @@ function createGiftModule_(deps) {
         const forGuest = () => records.filter(record => record.guestId === input.guestId);
         const response = (status, message) => Object.assign({ ok: true, status, message,
           guestId: guest.guestId, displayName: guest.displayName, tableNo: guest.tableNo,
-          category: guest.category }, giftStatus_(forGuest()));
+          category: guest.category, members: guest.members, partySize: guest.partySize,
+          cakeGroupId: guest.cakeGroupId, notes: guest.notes }, giftStatus_(forGuest()));
         if (input.action === 'guest') return response('GUEST_FOUND', '查詢不會登記收到紅包');
         if (!input.requestId || !input.operator) throw apiError_('BAD_REQUEST', '缺少操作人員或請求編號');
         // A retry of a previous receive must not resurrect an already cancelled envelope.

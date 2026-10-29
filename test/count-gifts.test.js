@@ -6,7 +6,7 @@ const test = require('node:test');
 
 function fixture() {
   let serial = 0, fail = '', flushes = 0;
-  const source = ['Code.gs', 'GiftRegister.gs', 'CountGifts.gs'].map(p => fs.readFileSync(p, 'utf8')).join('\n');
+  const source = ['Code.gs', 'GiftRegister.gs', 'CountGifts.gs', 'Reception.gs'].map(p => fs.readFileSync(p, 'utf8')).join('\n');
   const tables = {};
   function sheet(name, rows) {
     const data = rows;
@@ -73,6 +73,18 @@ test('清點與更正寫入署名金額、人員時間，審計保留前後值�
   assert.equal(audit.after[5], 6000);
   assert.equal(audit.reason, '重新核對鈔票');
   assert.equal(f.tables.GiftAudit.data[2][2], 'COUNT_APPLIED');
+});
+
+test('接待例外收件建立獨立編號、金額與清點人員留白，逾時重試不新增', () => {
+  const f = fixture();
+  const data = { guestId: 'g001', signature: '家人第二包', exceptionType: '多包', state: '待清點', amount: '', notes: '' };
+  const result = f.call('receiveExtra', data);
+  assert.equal(result.record.state, '待清點'); assert.equal(result.record.amount, '');
+  assert.equal(result.record.countedBy, ''); assert.equal(result.record.countedAt, '');
+  assert.equal(result.record.envelopeCode, 'E001');
+  f.call('receiveExtra', data); assert.equal(f.list().length, 2);
+  assert.throws(() => f.call('receiveExtra', { ...data, amount: '3600' }, 'request-0002'), { code: 'BAD_REQUEST' });
+  assert.throws(() => f.call('receiveExtra', { ...data, receiptId: 'original' }, 'request-0003'), { code: 'BAD_REQUEST' });
 });
 
 test('另一手機與直接 Sheet 修改均使舊版本儲存失敗，不覆蓋金額', () => {

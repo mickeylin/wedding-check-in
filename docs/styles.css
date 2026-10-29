@@ -484,3 +484,14 @@ textarea { width: 100%; font: inherit; font-size: 16px; border: 1px solid var(--
   .count-list-header { display: block; }
   .count-list-header .button-row { margin-top: 12px; }
 }
+/* Reception facts and cake quantities stay readable on phone screens. */
+.cake-panel { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #ddd; }
+#partyMembers, #partyNotes, #cakeStatus, #receptionNotice { white-space: pre-line; }
+#partyMembers { font-weight: 600; }
+#cakeHistory p { padding: .6rem; background: #f4f4f4; font-size: .9rem; }
+#extraEnvelopePanel { margin: .8rem 0; }
+#cakePanel input { max-width: 8rem; }
+.cake-quantities { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-bottom: .75rem; }
+.cake-quantities > div { min-width: 0; }
+#nextGuestButton { position: sticky; bottom: 0; margin-top: .9rem; box-shadow: 0 -4px 10px rgb(255 255 255 / 90%); }
+#receptionFeedback:not(:empty) { padding: .75rem; background: #fff4ce; border: 1px solid #dac57c; border-radius: .5rem; }

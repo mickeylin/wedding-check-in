@@ -4,3 +4,6 @@ Thumbs.db
 .vscode/
 .idea/
 node_modules/
+outputs/
+/.tmp/
+/*婚禮邀請函*.csv

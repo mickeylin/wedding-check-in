@@ -1,5 +1,7 @@
 # 禮金簿操作與部署
 
+2026-10-29 新版接待增加八欄 Guests、喜餅共領與現場例外收件，部署需四份 Apps Script 檔案。請先依 [接待操作與部署](reception-operations.md) 更新；本文的既有紅包清點與編輯紀錄規則繼續適用。
+
 ## 初始化與升級
 
 先備份 Sheet。Apps Script 需要同時放入根目錄的 `Code.gs`、`GiftRegister.gs` 與 `CountGifts.gs`。在指令碼屬性設定 `API_PIN` 與 `SPREADSHEET_ID`，時區使用 `Asia/Taipei`。勿把 PIN 寫入公開程式碼。
@@ -10,7 +12,7 @@
 
 如需回復，先停止接待，取消隱藏封存副本，將目前 Guests 改名保留，再把備份改名為 Guests，並回復對應舊版 Code.gs 的部署。Gifts 的禮金收件資料不需回復或覆蓋。
 
-名單編號若需補齊可執行 `generateGuestIds`，會避開已使用的編號。正式名單匯入格式另行確認，勿直接整段貼上來源 CSV 覆蓋 Guests。
+名單編號若需補齊可執行 `generateGuestIds`，會避開已使用的編號。RSVP CSV 的轉換方式見[賓客名單匯入](guest-import.md)；勿直接整段貼上來源 CSV 覆蓋 Guests，也不可把已被 Gifts 引用的 ID 改配給其他賓客。
 
 由一位管理者執行 `installGiftEditTrigger` 並完成授權，安裝 `auditGiftEdit` 的可安裝編輯觸發器。同一帳號重跑不會重複安裝；不要由兩位管理者各安裝一份。程式/API 寫入不觸發 Sheet 編輯事件，收件與撤銷資訊直接保留在 Gifts 原始列。
 

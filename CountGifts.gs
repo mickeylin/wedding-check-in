@@ -16,7 +16,7 @@ function countView_(row) {
     exceptionType: record.exceptionType, version: countHash_(row) };
 }
 
-function countInput_(raw) {
+function countInput_(raw, receiving) {
   let input;
   try { input = typeof raw === 'string' ? JSON.parse(raw) : raw; }
   catch (err) { throw apiError_('BAD_REQUEST', '無法讀取清點內容'); }
@@ -29,7 +29,7 @@ function countInput_(raw) {
       throw apiError_('BAD_REQUEST', '文字過長，署名限 120 字，備註與原因限 500 字');
     }
   });
-  if (!['已清點', '待核對'].includes(result.state)) throw apiError_('BAD_REQUEST', '請選擇確認清點或待核對');
+  if (!(receiving ? ['待清點'] : ['已清點', '待核對']).includes(result.state)) throw apiError_('BAD_REQUEST', '請選擇有效的收件或清點狀態');
   if (input.amount != null && !['string', 'number'].includes(typeof input.amount)) {
     throw apiError_('BAD_REQUEST', '金額格式不符');
   }
@@ -38,6 +38,9 @@ function countInput_(raw) {
     throw apiError_('BAD_REQUEST', '金額需為非負數，最多九位整數及兩位小數');
   }
   result.amount = rawAmount === '' ? '' : Number(rawAmount);
+  if (receiving && (result.receiptId || result.version || result.amount !== '')) {
+    throw apiError_('BAD_REQUEST', '現場例外收件只能新增紅包，金額必須留白');
+  }
   if (result.state === '已清點' && (!result.signature || result.amount === '')) {
     throw apiError_('BAD_REQUEST', '確認清點需填署名與金額，未知金額請留白並選待核對');
   }
@@ -57,10 +60,10 @@ function handleCountApi_(payload, now) {
     return { ok: true, status: 'COUNT_LIST', records: readRows()
       .filter(row => row[0] && row[4] !== '已撤銷').map(countView_) };
   }
-  if (payload.action !== 'countSave') throw apiError_('BAD_REQUEST', '不支援的清點操作');
+  if (!['countSave', 'receiveExtra'].includes(payload.action)) throw apiError_('BAD_REQUEST', '不支援的清點操作');
   const requestId = String(payload.requestId || '');
   if (!/^[a-zA-Z0-9_-]{8,100}$/.test(requestId)) throw apiError_('BAD_REQUEST', '缺少有效請求編號');
-  const input = countInput_(payload.data);
+  const input = countInput_(payload.data, payload.action === 'receiveExtra');
   const fingerprint = countHash_({ operator: session.operator, input });
   return createScriptLock_(20000).runExclusive(() => {
     const audit = requireGiftSchema_(ss, 'GiftAudit', GIFT_AUDIT_HEADERS);
@@ -125,8 +128,8 @@ function handleCountApi_(payload, now) {
       after[3] = input.signature;
       after[4] = input.state;
       after[5] = input.amount;
-      after[8] = session.operator;
-      after[9] = now.toISOString();
+      after[8] = input.state === '待清點' ? '' : session.operator;
+      after[9] = input.state === '待清點' ? '' : now.toISOString();
       after[10] = input.notes;
       after[16] = input.exceptionType;
       // Normalize dates before persisting the audit, so replay comparisons are stable.

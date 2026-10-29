@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>婚禮禮金簿</title>
-  <link rel="stylesheet" href="./styles.css?v=97f8a5896f70">
+  <title>婚禮接待</title>
+  <link rel="stylesheet" href="./styles.css?v=5f63d6375011">
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
   <header class="topbar">
     <div>
-      <h1>婚禮禮金簿</h1>
-      <p>查桌號・收到紅包後再登記</p>
+      <h1>婚禮接待</h1>
+      <p>查桌號・收紅包・領喜餅</p>
     </div>
     <div class="header-status"><span id="operatorStatus"></span><a id="connectionStatus" class="status-pill" href="#syncTitle">未設定</a></div>
   </header>
@@ -34,10 +34,18 @@
       <strong>準備接待</strong><span>先登入下載名單，即可掃描或查找賓客。</span>
     </div>
 
-    <nav class="mode-switch" aria-label="工作模式">
-      <button id="receptionMode" type="button" aria-pressed="true">接待收件</button>
-      <button id="countingMode" type="button" class="secondary-button" aria-pressed="false">紅包清點</button>
-    </nav>
+    <button id="receptionMode" type="button" aria-pressed="true">現場接待</button>
+    <details class="panel" id="afterWeddingTools">
+      <summary>婚宴後使用</summary>
+      <button id="countingMode" type="button" class="secondary-button" aria-pressed="false">回家清點紅包</button>
+      <p>現場只登記收到紅包，金額回家再填。</p>
+    </details>
+    <section class="panel" id="receptionPending" hidden aria-live="polite">
+      <p id="receptionPendingText"></p>
+      <button type="button" id="receptionRetry">核對原操作結果／重試</button>
+    </section>
+    <section class="panel" id="receptionNotice" hidden aria-live="polite"></section>
+    <button id="unlistedEnvelope" type="button" class="secondary-button">名單外／代送紅包</button>
     <section id="countingPanel" class="panel counting-panel" aria-labelledby="countingTitle" hidden>
       <h2 id="countingTitle">紅包清點</h2>
       <p id="countStatus" role="status" aria-live="polite"></p>
@@ -189,9 +197,31 @@
         <div><span>紅包標記・賓客編號</span><strong id="guestCode"></strong></div>
       </div>
       <p id="checkinModalMessage"></p>
+      <p id="partyMembers"></p>
+      <p id="partyNotes"></p>
+      <p id="receptionFeedback" role="status" aria-live="polite"></p>
 
       <button id="receiveButton" type="button" hidden>收到紅包</button>
       <button id="cancelReceiptButton" class="secondary-button" type="button" hidden>撤銷誤收件</button>
+      <details id="extraEnvelopePanel">
+        <summary>第二包／名單外／代送紅包</summary>
+        <label for="extraEnvelopeType">類型</label>
+        <select id="extraEnvelopeType"><option value="多包">同組第二包</option><option value="名單外">名單外</option><option value="署名不同／代送">署名不同／代送</option></select>
+        <label for="extraEnvelopeSignature">紅包署名</label><input id="extraEnvelopeSignature" maxlength="120">
+        <label for="extraEnvelopeNotes">備註</label><input id="extraEnvelopeNotes" maxlength="500">
+        <button id="receiveExtraButton" type="button" class="secondary-button">登記這包（不填金額）</button>
+      </details>
+      <section class="cake-panel" id="cakePanel" aria-label="喜餅發放">
+        <h3>喜餅</h3><p id="cakeStatus" aria-live="polite"></p>
+        <button id="cakeRefresh" type="button" class="secondary-button">更新領餅狀態</button>
+        <div class="cake-quantities">
+          <div><label for="cakeWestern">本次西式盒數</label><input id="cakeWestern" type="number" min="0" step="1" value="0" inputmode="numeric"></div>
+          <div><label for="cakeChinese">本次中式盒數</label><input id="cakeChinese" type="number" min="0" step="1" value="0" inputmode="numeric"></div>
+        </div>
+        <button id="cakeIssue" type="button">確認發放喜餅</button>
+        <p>收到確認後再交餅。斷網時由固定一人使用同一份紙本登記。</p>
+        <details><summary>領取紀錄／更正</summary><div id="cakeHistory"></div></details>
+      </section>
       <button id="nextGuestButton" class="secondary-button" type="button">下一位</button>
       <details class="timing-details" hidden>
         <summary>查看本次耗時</summary>
@@ -203,8 +233,9 @@
   <!-- Update the content-hash version when changing each local asset. -->
   <script src="./checkin-gate.js?v=5bdec7e233a6"></script>
   <script src="./gift-queue.js?v=610add030021"></script>
-  <script src="./app.js?v=7847a9c58ff0"></script>
+  <script src="./app.js?v=76abf24b3781"></script>
   <script src="./count-queue.js?v=e9c5a9cff383"></script>
-  <script src="./counting.js?v=de48f9c8e30e"></script>
+  <script src="./counting.js?v=141e917018b9"></script>
+  <script src="./reception.js?v=27aa6de01833"></script>
 </body>
 </html>

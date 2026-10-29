@@ -98,7 +98,8 @@ if (typeof window.addEventListener === 'function') {
     if (elements.checkinModal.hidden) return;
     if (event.key === 'Escape') { event.preventDefault(); continueToNextGuest(); }
     if (event.key !== 'Tab') return;
-    const targets = Array.from(elements.checkinModal.querySelectorAll('button:not([hidden]):not(:disabled), summary'));
+    const targets = Array.from(elements.checkinModal.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary'))
+      .filter(target => target.getClientRects().length > 0);
     if (!targets.length) return;
     const index = targets.indexOf(document.activeElement);
     if (event.shiftKey && index <= 0) {
@@ -299,6 +300,7 @@ function searchGuestSnapshot(query, category) {
     if (categories.length && !categories.includes(normalizeLookupText(guest.category))) return false;
     return !normalizedQuery
       || normalizeLookupText(guest.displayName).includes(normalizedQuery)
+      || normalizeLookupText(guest.members).includes(normalizedQuery)
       || normalizeLookupText(guest.guestId).includes(normalizedQuery);
   }).sort((left, right) => String(left.displayName).localeCompare(String(right.displayName)));
   return {
@@ -478,13 +480,14 @@ function openCheckinGate(title, message, tone) {
 }
 
 function updateGiftButtons() {
+  const busy = giftBusy || !!(window.Reception && window.Reception.isBusy());
   elements.receiveButton.hidden = !selectedGuest || selectedGuest.giftState !== '未收件';
   elements.cancelReceiptButton.hidden = !selectedGuest || !selectedGuest.canCancel;
-  elements.receiveButton.disabled = giftBusy;
-  elements.cancelReceiptButton.disabled = giftBusy;
-  elements.nextGuestButton.disabled = giftBusy;
+  elements.receiveButton.disabled = busy;
+  elements.cancelReceiptButton.disabled = busy;
+  elements.nextGuestButton.disabled = busy;
   elements.nextGuestButton.textContent = selectedGuest && selectedGuest.giftState === '未收件'
-    ? '只查桌號／下一位' : '下一位';
+    ? '完成接待／下一位' : '下一位';
   if (!elements.checkinModal.hidden && [elements.receiveButton, elements.cancelReceiptButton]
     .some(button => button.hidden && document.activeElement === button)) {
     elements.nextGuestButton.focus();
@@ -497,6 +500,7 @@ function renderGiftResult(data) {
     if (data && data.status === 'UNAUTHORIZED') handleUnauthorized(data.message);
     updateGiftButtons();
     openCheckinGate('請重新查詢', data && data.message || '無法取得資料', 'error');
+    if (window.Reception) window.Reception.show(null);
     return;
   }
   selectedGuest = applyLocalGiftState(data);
@@ -510,6 +514,7 @@ function renderGiftResult(data) {
   openCheckinGate(selectedGuest.displayName, detail, tone);
   elements.resultBox.hidden = true;
   updateGiftButtons();
+  if (window.Reception) window.Reception.show(selectedGuest);
 }
 
 async function mutateGift(action) {
@@ -882,8 +887,9 @@ function recordGiftTiming(label, started, data, sessionMs = 0) {
 }
 
 async function continueToNextGuest() {
-  if (giftBusy) return;
+  if (giftBusy || (window.Reception && window.Reception.isBusy())) return;
   selectedGuest = null;
+  if (window.Reception) window.Reception.show(null);
   updateGiftButtons();
   const resumeScanner = shouldResumeScannerAfterGate;
   shouldResumeScannerAfterGate = false;
@@ -1067,6 +1073,21 @@ function applyGuestSnapshot(guests) {
   (Array.isArray(guests) ? guests : []).forEach(guest => rememberGuest(guest, false));
   window.sessionStorage.setItem(GUEST_SNAPSHOT_STORAGE_KEY,
     JSON.stringify(Array.from(guestSnapshot.values())));
+  updateLookupCategories();
+}
+
+function updateLookupCategories() {
+  const categories = Array.from(new Set(Array.from(guestSnapshot.values())
+    .map(guest => guest.category).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'zh-TW'));
+  if (!categories.length) return;
+  const previous = elements.lookupCategory.value;
+  elements.lookupCategory.replaceChildren();
+  const add = (value, label) => {
+    const option = document.createElement('option'); option.value = value; option.textContent = label;
+    elements.lookupCategory.append(option);
+  };
+  add('', '全部分類'); categories.forEach(category => add(category, category));
+  elements.lookupCategory.value = categories.includes(previous) ? previous : '';
 }
 
 function reconcileGiftQueueWithSnapshot(guests) {
