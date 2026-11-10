@@ -48,6 +48,7 @@ test('QR 查詢只送 guest；按下一位不新增紅包', async () => {
   assert.equal(f.requests.length, 1);
   assert.equal(f.requests[0].action, 'guest');
   assert.equal(f.nodes.get('#receiveButton').hidden, false);
+  assert.equal(f.nodes.get('#nextGuestButton').textContent, '下一位');
   assert.equal(f.nodes.get('#guestTable').textContent, '湖畔咖啡');
   await f.ui.next();
   assert.equal(f.requests.length, 1);
@@ -243,17 +244,31 @@ test('儲存設定時立即建立 session，不把登入延遲留給第一筆查
   assert.match(f.nodes.get('#operatorStatus').textContent, /工作人員・已登入/);
 });
 
-test('賓客結果集中顯示，下一位解除背景限制且不留下舊結果', async () => {
+test('編號查詢的返回按鈕關閉賓客畫面並解除背景限制', async () => {
   const f = loadUi();
   await f.ui.query('G001');
   assert.equal(f.nodes.get('#guestCode').textContent, 'G001');
   assert.equal(f.nodes.get('#guestFacts').hidden, false);
   assert.equal(f.nodes.get('#resultBox').hidden, true);
   assert.equal(f.nodes.get('main').inert, true);
-  assert.equal(f.nodes.get('#nextGuestButton').textContent, '下一位');
+  assert.equal(f.nodes.get('#nextGuestButton').textContent, '返回編號查詢');
   await f.ui.next();
   assert.equal(f.nodes.get('main').inert, false);
   assert.equal(f.nodes.get('#checkinModal').hidden, true);
+});
+
+test('姓名查詢返回原本的結果按鈕，即使相機已開啟', async () => {
+  const f = loadUi();
+  f.context.Html5Qrcode = class { async start() {} };
+  await f.ui.start();
+  let focused = false;
+  const resultButton = { isConnected: true, focus() { focused = true; } };
+  await f.ui.query('G001', { source: 'lookup', returnFocus: resultButton });
+  assert.equal(f.nodes.get('#nextGuestButton').textContent, '返回查詢結果');
+  await f.ui.next();
+  assert.equal(focused, true);
+  assert.equal(f.nodes.get('#checkinModal').hidden, true);
+  assert.deepEqual(f.requests.map(request => request.action), ['guest']);
 });
 
 test('同一頁再次儲存並登入仍會重建 session 與賓客快照', async () => {

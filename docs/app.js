@@ -78,6 +78,7 @@ const recentGuestIdScanAt = new Map();
 const checkinGate = window.CheckinGate.create();
 let shouldResumeScannerAfterGate = false;
 let guestReturnFocus = null;
+let guestEntrySource = '';
 
 loadGiftQueue();
 loadSettings();
@@ -195,7 +196,7 @@ async function queryGuest(guestId, options = {}) {
   const isManual = options.source !== 'scanner';
   if (!checkinGate.begin()) {
     if (isManual) {
-      showResult('請先完成目前查詢', '按「下一位」後再操作。', 'warn');
+      showResult('請先完成目前查詢', '請先關閉目前的賓客畫面，再重新查詢。', 'warn');
     }
     return;
   }
@@ -221,14 +222,15 @@ async function queryGuest(guestId, options = {}) {
   }
 
   recentGuestIdScanAt.set(guestId, now);
-  guestReturnFocus = document.activeElement;
+  guestEntrySource = options.source || 'manual';
+  guestReturnFocus = options.returnFocus || null;
   pruneRecentGuestIds(now);
   await loadGuest(guestId, operationStarted, sessionMs);
 }
 async function loadGuest(guestId, operationStarted = Date.now(), sessionMs = 0) {
   const settings = getSettings();
   const requestId = createRequestId();
-  shouldResumeScannerAfterGate = isScanning;
+  shouldResumeScannerAfterGate = guestEntrySource === 'scanner' && isScanning;
 
   try {
     // The gate suppresses additional decodes while this guest is open.
@@ -486,7 +488,9 @@ function updateGiftButtons() {
   elements.receiveButton.disabled = busy;
   elements.cancelReceiptButton.disabled = busy;
   elements.nextGuestButton.disabled = busy;
-  elements.nextGuestButton.textContent = selectedGuest?.guestId ? '下一位' : '返回現場接待';
+  const returnLabels = { lookup: '返回查詢結果', manual: '返回編號查詢' };
+  elements.nextGuestButton.textContent = returnLabels[guestEntrySource]
+    || (selectedGuest?.guestId ? '下一位' : '返回現場接待');
   if (!elements.checkinModal.hidden && [elements.receiveButton, elements.cancelReceiptButton]
     .some(button => button.hidden && document.activeElement === button)) {
     elements.nextGuestButton.focus();
@@ -547,7 +551,7 @@ async function mutateGift(action) {
   } catch (err) {
     recordGiftTiming('操作失敗', operationStarted, null);
     selectedGuest = null;
-    openCheckinGate('撤銷狀態待確認', messageOf(err) + '。可能已撤銷；請按下一位後重新查詢，核對狀態再操作。', 'error');
+    openCheckinGate('撤銷狀態待確認', messageOf(err) + '。可能已撤銷，請返回後重新查詢並核對狀態。', 'error');
   } finally {
     giftBusy = false;
     updateGiftButtons();
@@ -894,6 +898,10 @@ function recordGiftTiming(label, started, data, sessionMs = 0) {
 
 async function continueToNextGuest() {
   if (giftBusy || (window.Reception && window.Reception.isBusy())) return;
+  const returnFocus = guestReturnFocus?.isConnected ? guestReturnFocus
+    : guestEntrySource === 'lookup' ? elements.lookupQuery : elements.manualGuestId;
+  guestReturnFocus = null;
+  guestEntrySource = '';
   selectedGuest = null;
   if (window.Reception) window.Reception.show(null);
   updateGiftButtons();
@@ -911,7 +919,7 @@ async function continueToNextGuest() {
       await startScanner();
       elements.stopButton.focus();
     } else {
-      (guestReturnFocus && guestReturnFocus.isConnected ? guestReturnFocus : elements.manualGuestId).focus();
+      returnFocus.focus();
     }
   } finally {
     elements.nextGuestButton.disabled = false;
@@ -957,7 +965,7 @@ function renderLookupResults(data) {
     button.disabled = !guest.guestId;
     button.textContent = guest.guestId ? '查看分類／紅包' : '缺少賓客 ID';
     button.addEventListener('click', () => {
-      queryGuest(guest.guestId, { source: 'lookup' });
+      queryGuest(guest.guestId, { source: 'lookup', returnFocus: button });
     });
     actions.append(button);
     card.append(actions);
