@@ -2,7 +2,7 @@
  * device, then sent in the background with one immutable request id. */
 (() => {
   const ids = ['receptionMode', 'countingMode', 'countingPanel', 'receptionScanner', 'receptionLookup', 'unlistedEnvelope',
-    'afterWeddingTools', 'countingTitle', 'scannerTitle',
+    'afterWeddingTools', 'countingTitle', 'countListNav', 'scannerTitle',
     'countRefresh', 'countException', 'countStatus', 'countRetry', 'countQueueSection', 'countQueueSummary', 'countQueueList',
     'countEditor', 'countEditorTitle', 'countReceiptInfo', 'countFields', 'countGuestGroup', 'countGuestId',
     'countType', 'countSignature', 'countAmount', 'countNotesLabel', 'countNotes', 'countReasonGroup',
@@ -88,6 +88,11 @@
     el.countNotesLabel.textContent = '備註（選填）';
     clearFormError();
   }
+  function showEditor(editing) {
+    el.countEditor.hidden = !editing;
+    el.countBrowser.hidden = editing;
+    el.countListNav.hidden = editing;
+  }
   function open(record, restored) {
     if (record && queueModel.findForReceipt(queue, record.receiptId)) {
       message('這包已有待同步清點，請先處理其他包。', 'error'); return;
@@ -102,7 +107,7 @@
     fill(draft.values);
     configureForm(record);
     message('');
-    el.countEditor.hidden = false; el.countBrowser.hidden = true;
+    showEditor(true);
     el.countEditorTitle.textContent = record
       ? (record.state === '已清點' ? '更正清點：' : '清點：') + (record.envelopeCode || record.guestId)
       : '新增例外紅包';
@@ -186,7 +191,7 @@
   async function authenticate() {
     if (!isBrowserOnline()) { message('目前離線；清點會保留在手機，連線後再同步。', 'error'); return false; }
     if (!validateSettings() || !(await ensureSession())) {
-      message('請先展開登入與設定，登入後再回到清點。', 'error'); return false;
+      message('請先完成工作人員登入，再重新載入紅包清單。', 'error'); return false;
     }
     return true;
   }
@@ -251,7 +256,7 @@
       }
       draft = null; selected = null; initialValues = null;
       try { persistDraft(); } catch (err) { /* Queue is already durable and authoritative. */ }
-      el.countEditor.hidden = true; el.countBrowser.hidden = false; render();
+      showEditor(false); render();
       const offline = !isBrowserOnline() ? '目前離線；' : '';
       message(offline + (data.receiptId ? '已保存，背景同步中。可繼續下一包。'
         : '已保存；取得 E 編號前請隔離這包。'), 'success');
@@ -369,7 +374,7 @@
   el.countClose.addEventListener('click', () => {
     if (busy || (formChanged() && !window.confirm('尚未儲存修改，確定返回紅包清單？'))) return;
     draft = null; selected = null; initialValues = null; persistDraft();
-    el.countEditor.hidden = true; el.countBrowser.hidden = false; render();
+    showEditor(false); render();
     el.countSearch.focus();
   });
 

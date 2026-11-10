@@ -207,13 +207,16 @@ test('未修改清點內容時返回清單不跳確認', async () => {
   f.get('afterWeddingTools').open = true;
   await f.fire('countingMode');
   assert.equal(f.get('afterWeddingTools').hidden, true);
+  assert.equal(f.get('countListNav').hidden, false);
   await f.get('countRecords').children[0].handlers.click();
+  assert.equal(f.get('countListNav').hidden, true);
 
   await f.fire('countClose');
 
   assert.equal(f.confirmCalls(), 0);
   assert.equal(f.get('countEditor').hidden, true);
   assert.equal(f.get('countBrowser').hidden, false);
+  assert.equal(f.get('countListNav').hidden, false);
 
   await f.fire('receptionMode');
 

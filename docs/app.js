@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'wedding-check-in-settings';
+const API_URL = 'https://script.google.com/macros/s/AKfycbw7p69vK-OqidULCYMXds6UveyoT-GjT6d9HChaYXzkHnSkvgeUayGviYcpxtDwGZGF/exec';
 const SESSION_STORAGE_KEY = 'wedding-check-in-session-token';
 const SESSION_EXPIRES_STORAGE_KEY = 'wedding-check-in-session-expires-at';
 const SESSION_OPERATOR_STORAGE_KEY = 'wedding-check-in-session-operator';
@@ -18,7 +19,6 @@ const elements = {
   guestCode: document.querySelector('#guestCode'),
   giftSyncPanel: document.querySelector('#giftSyncPanel'),
   queueDetails: document.querySelector('#queueDetails'),
-  apiUrl: document.querySelector('#apiUrl'),
   pin: document.querySelector('#pin'),
 
   operator: document.querySelector('#operator'),
@@ -79,8 +79,8 @@ const checkinGate = window.CheckinGate.create();
 let shouldResumeScannerAfterGate = false;
 let guestReturnFocus = null;
 
-loadSettings();
 loadGiftQueue();
+loadSettings();
 loadGuestSnapshot();
 renderGiftQueue();
 updateConnectionStatus();
@@ -121,7 +121,7 @@ elements.saveSettingsButton.addEventListener('click', async () => {
   showResult('正在登入', '正在建立工作階段，完成後即可開始掃描。', 'neutral');
   try {
     if (await saveSettings()) {
-      showResult('設定已儲存', '登入完成，可以開始掃描。', 'success');
+      showResult('已登入', '名單已更新，可以開始掃描。', 'success');
     }
   } finally {
     elements.saveSettingsButton.disabled = false;
@@ -364,7 +364,6 @@ function ensureSession() {
       }
       window.sessionStorage.setItem(SESSION_OPERATOR_STORAGE_KEY, data.operator || settings.operator);
       if (Array.isArray(data.guests)) applyGuestSnapshot(data.guests);
-      if (window.Reception) window.Reception.seed(data.cakeSnapshot, data.snapshotCreatedAt);
       if (giftQueue.length) resumeGiftQueueAfterLogin();
       elements.settingsPanel.open = false;
       updateConnectionStatus();
@@ -373,7 +372,7 @@ function ensureSession() {
     .catch(err => {
       showResult(
         '無法建立工作階段',
-        messageOf(err) + '。請確認 Apps Script Web App URL、PIN 與部署權限。',
+        messageOf(err) + '。請確認網路與 PIN。若仍無法登入，請聯絡管理人員。',
         'error'
       );
       return false;
@@ -487,7 +486,7 @@ function updateGiftButtons() {
   elements.receiveButton.disabled = busy;
   elements.cancelReceiptButton.disabled = busy;
   elements.nextGuestButton.disabled = busy;
-  elements.nextGuestButton.textContent = '下一位';
+  elements.nextGuestButton.textContent = selectedGuest?.guestId ? '下一位' : '返回現場接待';
   if (!elements.checkinModal.hidden && [elements.receiveButton, elements.cancelReceiptButton]
     .some(button => button.hidden && document.activeElement === button)) {
     elements.nextGuestButton.focus();
@@ -509,7 +508,7 @@ function renderGiftResult(data) {
   const state = selectedGuest.giftState;
   const shortStatus = {
     '未收件': '尚未收紅包', '待清點': '已登記收紅包', '已清點': '已登記收紅包',
-    '待同步': '已保存在這支手機・待同步', '待核對': '紅包收件需核對', '清點待核對': '紅包清點需核對',
+    '待同步': '已保存在這支手機・待同步', '待核對': '紅包收件需核對', '清點待核對': '紅包需核對',
     '例外收件': '請填紅包署名，取得編號後寫在袋上'
   };
   const needsAttention = ['待核對', '清點待核對'].includes(state);
@@ -986,10 +985,6 @@ function validateSettings() {
     showResult('缺少操作人員', '請填寫操作人員姓名。', 'warn');
     return false;
   }
-  if (!settings.apiUrl) {
-    showResult('缺少 API URL', '請先貼上 Apps Script Web App URL。', 'warn');
-    return false;
-  }
   if (!settings.sessionToken && !settings.pin) {
     showResult('缺少 PIN', '請輸入工作人員 PIN。', 'warn');
     return false;
@@ -999,7 +994,7 @@ function validateSettings() {
 
 function getSettings() {
   return {
-    apiUrl: elements.apiUrl.value.trim(),
+    apiUrl: API_URL,
     pin: elements.pin.value.trim(),
 
     operator: elements.operator.value.trim(),
@@ -1011,11 +1006,7 @@ async function saveSettings() {
   if (!validateSettings()) return false;
   const settings = getSettings();
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      apiUrl: settings.apiUrl,
-
-      operator: settings.operator
-    }));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ operator: settings.operator }));
   } catch (err) {
     giftQueueStorageAvailable = false;
     renderGiftQueue();
@@ -1034,16 +1025,16 @@ function loadSettings() {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const settings = JSON.parse(raw);
-    elements.apiUrl.value = settings.apiUrl || '';
-    elements.pin.value = '';
-
     elements.operator.value = settings.operator || '';
-
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      apiUrl: elements.apiUrl.value,
-
-      operator: elements.operator.value
-    }));
+    if (settings.apiUrl && settings.apiUrl !== API_URL) {
+      clearSessionToken();
+      const priorQueue = giftQueue.map(item =>
+        ['queued', 'syncing', 'retry_wait', 'needs_login'].includes(item.status)
+          ? { ...item, status: 'attention', lastError: '這筆收件屬於先前的帳本，請核對原帳本及實體紅包。' }
+          : item);
+      if (giftQueueStorageAvailable && !persistGiftQueue(priorQueue)) return;
+    }
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ operator: elements.operator.value }));
   } catch (err) {
     try { window.localStorage.removeItem(STORAGE_KEY); } catch (removeError) {}
   }

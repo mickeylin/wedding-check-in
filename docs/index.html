@@ -4,24 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>婚禮接待</title>
-  <link rel="stylesheet" href="./styles.css?v=59564ce99bfe">
+  <link rel="stylesheet" href="./styles.css?v=e666cb872ce0">
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
   <header class="topbar">
     <div>
       <h1>婚禮接待</h1>
-      <p>查分類・收紅包・領喜餅</p>
+      <p>查分類・收紅包</p>
     </div>
-    <div class="header-status"><span id="operatorStatus"></span><a id="connectionStatus" class="status-pill" href="#syncTitle">未設定</a></div>
+    <div class="header-status"><span id="operatorStatus"></span><a id="connectionStatus" class="status-pill" href="#syncTitle">尚未登入</a></div>
   </header>
 
   <main class="layout">
     <details id="settingsPanel" class="panel setup-panel" open>
-      <summary id="settingsTitle">登入與設定 <span id="settingsHint">開始前請先登入</span></summary>
-
-      <label for="apiUrl">Apps Script API URL</label>
-      <input id="apiUrl" type="url" inputmode="url" placeholder="https://script.google.com/macros/s/.../exec">
+      <summary id="settingsTitle">工作人員登入 <span id="settingsHint">開始前請先登入</span></summary>
 
       <label for="pin">工作人員 PIN</label>
       <input id="pin" type="password" inputmode="numeric" autocomplete="off">
@@ -41,9 +38,9 @@
     <section class="panel" id="receptionNotice" hidden aria-live="polite"></section>
     <button id="unlistedEnvelope" type="button" class="secondary-button">名單外／代送紅包</button>
     <section id="countingPanel" class="panel counting-panel" aria-labelledby="countingTitle" hidden>
-      <div class="section-header">
-        <h2 id="countingTitle" tabindex="-1">紅包清點</h2>
+      <div id="countListNav" class="section-header">
         <button id="receptionMode" type="button" class="secondary-button compact-button">← 返回現場接待</button>
+        <h2 id="countingTitle" tabindex="-1">紅包清點</h2>
       </div>
       <p id="countStatus" role="status" aria-live="polite"></p>
       <section id="countQueueSection" class="count-queue" aria-label="清點同步" hidden>
@@ -203,25 +200,10 @@
         <p id="checkinModalMessage" role="status" aria-live="polite"></p>
         <button id="receiveButton" type="button" hidden>收到紅包</button>
       </section>
-      <section class="cake-panel" id="cakePanel" aria-label="喜餅發放">
-        <div class="cake-heading"><h3>喜餅</h3><span id="cakeGroupLabel"></span></div>
-        <p id="cakeStatus" aria-live="polite"></p>
-        <button id="cakeIssue" type="button">確認發放喜餅</button>
-      </section>
       <button id="nextGuestButton" class="secondary-button" type="button">下一位</button>
       <details id="guestDetails" class="guest-details">
         <summary>詳情與其他操作</summary>
         <h3>同行與備註</h3><p id="partyMembers"></p><p id="partyNotes"></p>
-        <div id="cakeDetails">
-          <h3>喜餅明細</h3><p id="cakeQuotaDetail"></p>
-          <div class="cake-quantities">
-            <div><label for="cakeWestern">本次西式盒數</label><input id="cakeWestern" type="number" min="0" step="1" value="0" inputmode="numeric"></div>
-            <div><label for="cakeChinese">本次中式盒數</label><input id="cakeChinese" type="number" min="0" step="1" value="0" inputmode="numeric"></div>
-          </div>
-          <p>確認成功後再交餅。斷網時由固定一人使用同一份紙本登記。</p>
-          <button id="cakeRefresh" type="button" class="secondary-button">更新領餅狀態</button>
-          <div id="cakeHistory"></div>
-        </div>
         <button id="cancelReceiptButton" class="secondary-button" type="button" hidden>撤銷誤收件</button>
         <details id="extraEnvelopePanel">
           <summary>第二包／名單外／代送紅包</summary>
@@ -242,9 +224,9 @@
   <!-- Update the content-hash version when changing each local asset. -->
   <script src="./checkin-gate.js?v=5bdec7e233a6"></script>
   <script src="./gift-queue.js?v=610add030021"></script>
-  <script src="./app.js?v=f93881c18cc5"></script>
+  <script src="./app.js?v=20c890d57c1d"></script>
   <script src="./count-queue.js?v=e9c5a9cff383"></script>
-  <script src="./counting.js?v=9faab65d8fc5"></script>
-  <script src="./reception.js?v=2767493ba5cc"></script>
+  <script src="./counting.js?v=4a04c3741873"></script>
+  <script src="./reception.js?v=7af03d4089f1"></script>
 </body>
 </html>

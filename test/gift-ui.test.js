@@ -35,7 +35,6 @@ function loadUi(options = {}) {
   const context = { window, navigator: { onLine: options.online !== false }, document, Date, Map, URL };
   const source = ['checkin-gate.js', 'gift-queue.js', 'app.js'].map(file => fs.readFileSync(path.join(__dirname, '..', 'docs', file), 'utf8')).join('\n');
   vm.runInNewContext(source + '\nthis.ui = { start: startScanner, stop: stopScanner, query: queryGuest, mutate: mutateGift, next: continueToNextGuest, render: renderGiftResult, save: saveSettings, sessionToken: readSessionToken, snapshot: typeof applyGuestSnapshot === "function" ? applyGuestSnapshot : null, searchSnapshot: typeof searchGuestSnapshot === "function" ? searchGuestSnapshot : null, queue: () => giftQueue, sync: kickGiftQueue, reloadQueue: loadGiftQueue, request: jsonpRequest };', context);
-  nodes.get('#apiUrl').value = 'https://example.test/exec';
   nodes.get('#operator').value = '工作人員';
   const requests = [];
   const guest = { ok: true, status: 'GUEST_FOUND', guestId: 'G001', displayName: '測試賓客', category: '湖畔咖啡', tableNo: '3', giftState: '未收件', canCancel: false };
@@ -53,6 +52,27 @@ test('QR 查詢只送 guest；按下一位不新增紅包', async () => {
   await f.ui.next();
   assert.equal(f.requests.length, 1);
   assert.equal(f.nodes.get('#receiveButton').hidden, true);
+});
+
+test('舊自訂網址不能覆蓋固定網址或把舊帳本的收件送過去', async () => {
+  const localStorage = new Map([
+    ['wedding-check-in-settings', JSON.stringify({ apiUrl: 'https://old.test/exec', operator: '工作人員' })],
+    ['wedding-check-in-gift-queue-v1', JSON.stringify([
+      { requestId: 'old-receipt', guestId: 'G001', operator: '工作人員', status: 'queued' }
+    ])]
+  ]);
+  const f = loadUi({ localStorage });
+  assert.equal(f.ui.sessionToken(), '');
+  assert.equal(f.ui.queue()[0].status, 'attention');
+  f.nodes.get('#pin').value = '1234';
+  f.context.jsonpRequest = async (settings, request) => {
+    assert.equal(settings.apiUrl, 'https://script.google.com/macros/s/AKfycbw7p69vK-OqidULCYMXds6UveyoT-GjT6d9HChaYXzkHnSkvgeUayGviYcpxtDwGZGF/exec');
+    f.requests.push(request);
+    return { ok: true, status: 'SESSION_CREATED', sessionToken: 'new-session' };
+  };
+  assert.equal(await f.ui.save(), true);
+  await f.ui.sync();
+  assert.deepEqual(f.requests.map(request => request.action), ['session']);
 });
 
 test('掃描查詢不等待相機 stop，下一位重用串流且手動停止仍有效', async () => {
