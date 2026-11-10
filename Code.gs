@@ -54,8 +54,12 @@ function generateGuestIds() {
   if (values.length < 2) return '目前沒有賓客資料';
 
   const map = headerMap_(values[0], GUEST_HEADERS);
-  const usedIds = new Set(values.slice(1).map(row => String(row[map['賓客ID']] || '').trim()).filter(Boolean));
-  let nextId = 1;
+  const gifts = ssGiftGuestIds_(sheet.getParent());
+  const reserved = values.slice(1).map(row => row[map['賓客ID']]).concat(gifts);
+  let nextId = reserved.reduce((max, id) => {
+    const match = canonicalGuestId_(id).match(/^PM([0-9A-F]{2})$/);
+    return match ? Math.max(max, parseInt(match[1], 16)) : max;
+  }, 0) + 1;
   let changed = 0;
 
   for (let i = 1; i < values.length; i++) {
@@ -64,17 +68,35 @@ function generateGuestIds() {
     if (!name) continue;
 
     if (!String(row[map['賓客ID']] || '').trim()) {
-      while (usedIds.has('G' + String(nextId).padStart(3, '0'))) nextId++;
-      row[map['賓客ID']] = 'G' + String(nextId++).padStart(3, '0');
-      usedIds.add(row[map['賓客ID']]);
+      if (nextId > 255) throw new Error('PM01–PMFF 賓客編號已用完');
+      row[map['賓客ID']] = formatPmGuestId_(nextId++);
+      changed++;
     }
-    changed++;
   }
 
-  sheet.getRange(2, 1, values.length - 1, GUEST_HEADERS.length)
-    .setValues(values.slice(1).map(row => row.slice(0, GUEST_HEADERS.length)));
+  if (changed) sheet.getRange(2, map['賓客ID'] + 1, values.length - 1, 1)
+    .setValues(values.slice(1).map(row => [row[map['賓客ID']]]));
+  if (changed) safeCacheRemove_(GIFT_GUEST_CACHE_KEY);
 
   return `已處理 ${changed} 筆資料`;
+}
+
+function ssGiftGuestIds_(ss) {
+  const gifts = ss.getSheetByName('Gifts');
+  const lastRow = gifts ? gifts.getLastRow() : 0;
+  return lastRow > 1 ? gifts.getRange(2, 2, lastRow - 1, 1).getValues().map(row => row[0]) : [];
+}
+
+function formatPmGuestId_(number) {
+  return 'PM' + number.toString(16).toUpperCase().padStart(2, '0');
+}
+
+function canonicalGuestId_(value) {
+  const id = String(value || '').trim();
+  if (/^PM[0-9A-F]{2}$/i.test(id)) return id.toUpperCase();
+  const old = id.match(/^G(\d+)$/i);
+  const number = old ? Number(old[1]) : 0;
+  return number > 0 && number <= 255 ? formatPmGuestId_(number) : id;
 }
 
 function doPost(e) {
@@ -123,7 +145,8 @@ function doGet(e) {
     return jsonResponse_({
       ok: true,
       service: 'wedding-check-in-api',
-      message: 'API is running'
+      message: 'API is running',
+      guestIdFormat: 'PMXX'
     });
   }
 
@@ -237,6 +260,7 @@ function createGoogleSheetsGuestStore_(ss) {
       const lastRow = sheet.getLastRow();
       if (lastRow < 2) return [];
       const normalizedQuery = normalizeLookupText_(query);
+      const idQuery = normalizeLookupText_(canonicalGuestId_(query));
       const filterCategories = lookupCategoriesForFilter_(category);
       const rows = sheet
         .getRange(2, 1, lastRow - 1, Math.max(GUEST_HEADERS.length, sheet.getLastColumn()))
@@ -254,11 +278,11 @@ function createGoogleSheetsGuestStore_(ss) {
           return !normalizedQuery
             || name.includes(normalizedQuery)
             || normalizeLookupText_(guest.members).includes(normalizedQuery)
-            || guestId.includes(normalizedQuery);
+            || guestId.includes(idQuery);
         })
         .sort((left, right) => {
-          const rankDifference = lookupMatchRank_(left, normalizedQuery)
-            - lookupMatchRank_(right, normalizedQuery);
+          const rankDifference = lookupMatchRank_(left, normalizedQuery, idQuery)
+            - lookupMatchRank_(right, normalizedQuery, idQuery);
           return rankDifference || left.displayName.localeCompare(right.displayName);
         });
     }
@@ -267,7 +291,7 @@ function createGoogleSheetsGuestStore_(ss) {
 
 function guestRecordFromRow_(row) {
   return {
-    guestId: String(row[GUEST_COL['賓客ID']] || '').trim(),
+    guestId: canonicalGuestId_(row[GUEST_COL['賓客ID']]),
     displayName: String(row[GUEST_COL['顯示姓名']] || '').trim(),
     category: String(row[GUEST_COL['新郎/新娘方']] || '').trim(),
     tableNo: String(row[GUEST_COL['桌號']] || '').trim(),
@@ -277,12 +301,12 @@ function guestRecordFromRow_(row) {
   };
 }
 
-function lookupMatchRank_(guest, query) {
+function lookupMatchRank_(guest, query, idQuery = query) {
   if (!query) return 2;
   const name = normalizeLookupText_(guest.displayName);
   if (name === query) return 0;
   if (name.startsWith(query)) return 1;
-  if (normalizeLookupText_(guest.guestId) === query) return 1;
+  if (normalizeLookupText_(guest.guestId) === idQuery) return 1;
   return 2;
 }
 

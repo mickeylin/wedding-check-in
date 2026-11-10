@@ -150,8 +150,15 @@ test('斷網收件不呼叫後端，重新載入後待同步紀錄仍存在', as
   assert.equal(f.ui.queue()[0].status, 'queued');
   assert.match(f.nodes.get('#giftQueueSummary').textContent, /尚未進入 Google Sheet/);
 
+  const key = 'wedding-check-in-gift-queue-v1';
+  const original = f.ui.queue()[0];
+  localStorage.set(key, JSON.stringify([{ ...original, guestId: 'G001' }]));
   const reloaded = loadUi({ online: false, localStorage });
-  assert.equal(reloaded.ui.queue()[0].guestId, 'G001');
+  reloaded.ui.snapshot([{ ...f.guest, guestId: 'PM01' }]);
+  await reloaded.ui.query('PM01');
+  assert.equal(reloaded.nodes.get('#receiveButton').hidden, true);
+  assert.equal(reloaded.ui.queue()[0].guestId, 'PM01');
+  assert.equal(reloaded.ui.queue()[0].requestId, original.requestId);
   assert.equal(reloaded.ui.queue()[0].status, 'queued');
 });
 
@@ -247,7 +254,7 @@ test('儲存設定時立即建立 session，不把登入延遲留給第一筆查
 test('編號查詢的返回按鈕關閉賓客畫面並解除背景限制', async () => {
   const f = loadUi();
   await f.ui.query('G001');
-  assert.equal(f.nodes.get('#guestCode').textContent, 'G001');
+  assert.equal(f.nodes.get('#guestCode').textContent, 'PM01');
   assert.equal(f.nodes.get('#guestFacts').hidden, false);
   assert.equal(f.nodes.get('#resultBox').hidden, true);
   assert.equal(f.nodes.get('main').inert, true);
@@ -359,8 +366,8 @@ test('同行者本名與別名能找到同一張卡，分類由新名單產生',
   const f = loadUi();
   f.ui.snapshot([{ ...f.guest, displayName: '測試家庭', members: '同行甲、同行乙', category: '女方親戚' },
     { ...f.guest, guestId: 'G2', displayName: '朋友', category: '麥當勞' }]);
-  assert.equal(f.ui.searchSnapshot('同行甲', '').results[0].guestId, 'G001');
-  assert.equal(f.ui.searchSnapshot('同行乙', '').results[0].guestId, 'G001');
+  assert.equal(f.ui.searchSnapshot('同行甲', '').results[0].guestId, 'PM01');
+  assert.equal(f.ui.searchSnapshot('同行乙', '').results[0].guestId, 'PM01');
   assert.equal(f.ui.searchSnapshot('', '麥當勞').results.length, 1);
   assert.ok(f.nodes.get('#lookupCategory').children.some(option => option.value === '麥當勞'));
 });
@@ -376,6 +383,6 @@ test('姓名與分類查找也使用登入快照', () => {
   const byName = f.ui.searchSnapshot('tutu', '');
   const byCategory = f.ui.searchSnapshot('', '男方朋友');
 
-  assert.deepEqual(Array.from(byName.results, guest => guest.guestId), ['g001']);
-  assert.deepEqual(Array.from(byCategory.results, guest => guest.guestId), ['g002', 'g001']);
+  assert.deepEqual(Array.from(byName.results, guest => guest.guestId), ['PM01']);
+  assert.deepEqual(Array.from(byCategory.results, guest => guest.guestId), ['PM02', 'PM01']);
 });

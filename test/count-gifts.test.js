@@ -114,7 +114,7 @@ test('未知送禮人可留白待核對，獨立 E 編號；之後可連結賓�
   assert.equal(held.record.envelopeCode, 'E001');
   assert.equal(held.record.amount, '');
   const saved = f.call('countSave', { ...held.record, guestId: 'g001', signature: '王先生', amount: '1200', state: '已清點' }, 'request-0002');
-  assert.equal(saved.record.guestId, 'g001');
+  assert.equal(saved.record.guestId, 'PM01');
   assert.equal(saved.record.envelopeCode, 'E001');
 });
 
@@ -123,7 +123,7 @@ test('第二包及名單外各有編號，原收件不被覆蓋，重試不新�
   const input = { state: '已清點', exceptionType: '多包', guestId: 'G001', signature: '第二位', amount: '2000' };
   const first = f.call('countSave', input);
   assert.equal(first.record.envelopeCode, 'E001');
-  assert.equal(first.record.guestId, 'g001');
+  assert.equal(first.record.guestId, 'PM01');
   assert.equal(f.call('countSave', input).status, 'COUNT_REPLAY');
   assert.equal(f.tables.Gifts.data.length, 3);
   assert.equal(f.tables.Gifts.data[1][5], '');

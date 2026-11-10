@@ -192,6 +192,7 @@ function onQrDecoded(decodedText) {
 }
 
 async function queryGuest(guestId, options = {}) {
+  guestId = canonicalGuestId(guestId);
   const operationStarted = Date.now();
   const isManual = options.source !== 'scanner';
   if (!checkinGate.begin()) {
@@ -297,13 +298,14 @@ async function searchGuests() {
 
 function searchGuestSnapshot(query, category) {
   const normalizedQuery = normalizeLookupText(query);
+  const idQuery = normalizeLookupText(canonicalGuestId(query));
   const categories = lookupCategoriesForFilter(category);
   const matches = Array.from(guestSnapshot.values()).filter(guest => {
     if (categories.length && !categories.includes(normalizeLookupText(guest.category))) return false;
     return !normalizedQuery
       || normalizeLookupText(guest.displayName).includes(normalizedQuery)
       || normalizeLookupText(guest.members).includes(normalizedQuery)
-      || normalizeLookupText(guest.guestId).includes(normalizedQuery);
+      || normalizeLookupText(guest.guestId).includes(idQuery);
   }).sort((left, right) => String(left.displayName).localeCompare(String(right.displayName)));
   return {
     ok: true,
@@ -506,7 +508,7 @@ function renderGiftResult(data) {
     if (window.Reception) window.Reception.show(null);
     return;
   }
-  selectedGuest = applyLocalGiftState(data);
+  selectedGuest = applyLocalGiftState({ ...data, guestId: canonicalGuestId(data.guestId) });
   elements.guestTable.textContent = selectedGuest.category || '未填寫';
   elements.guestCode.textContent = selectedGuest.guestId;
   const state = selectedGuest.giftState;
@@ -627,7 +629,9 @@ function loadGiftQueue() {
   try {
     const raw = window.localStorage.getItem(GIFT_QUEUE_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    giftQueue = giftQueueModel.recover(parsed);
+    giftQueue = giftQueueModel.recover(parsed).map(item => ({
+      ...item, guestId: canonicalGuestId(item.guestId)
+    }));
     giftQueueStorageAvailable = true;
     if (raw && JSON.stringify(parsed) !== JSON.stringify(giftQueue)) {
       window.localStorage.setItem(GIFT_QUEUE_STORAGE_KEY, JSON.stringify(giftQueue));
@@ -973,6 +977,14 @@ function renderLookupResults(data) {
   });
 }
 
+function canonicalGuestId(value) {
+  const id = String(value || '').trim();
+  if (/^PM[0-9A-F]{2}$/i.test(id)) return id.toUpperCase();
+  const old = id.match(/^G(\d+)$/i);
+  const number = old ? Number(old[1]) : 0;
+  return number > 0 && number <= 255 ? 'PM' + number.toString(16).toUpperCase().padStart(2, '0') : id;
+}
+
 function extractGuestId(rawValue) {
   const value = String(rawValue || '').trim();
   if (!value) return '';
@@ -1096,7 +1108,7 @@ function updateLookupCategories() {
 
 function reconcileGiftQueueWithSnapshot(guests) {
   if (!giftQueueModel || !giftQueue.length) return;
-  const byGuestId = new Map((Array.isArray(guests) ? guests : []).map(guest => [guest.guestId, guest]));
+  const byGuestId = new Map((Array.isArray(guests) ? guests : []).map(guest => [canonicalGuestId(guest.guestId), guest]));
   let changed = false;
   const reconciled = giftQueue.map(item => {
     const guest = byGuestId.get(item.guestId);
@@ -1122,7 +1134,7 @@ function loadGuestSnapshot() {
 
 function rememberGuest(guest, persist = true) {
   if (!guest || !guest.ok || !guest.guestId) return;
-  const stored = { ...applyLocalGiftState(guest) };
+  const stored = { ...applyLocalGiftState({ ...guest, guestId: canonicalGuestId(guest.guestId) }) };
   delete stored.localSnapshot;
   guestSnapshot.set(stored.guestId, stored);
   if (persist) {

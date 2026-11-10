@@ -198,9 +198,9 @@ test('主檔備份失敗時停止遷移，原始內容不變', () => {
   assert.deepEqual(sheet.data, before);
 });
 
-test('正式 API adapter 每次只讀取兩表各一次；查詢零鎖零 flush，收件仍鎖內重讀', () => {
+test('舊 QR 與新十六進位編號查到同一筆，收件仍在鎖內重讀', () => {
   const headers = load();
-  const guests = sheetDouble('Guests', [Array.from(headers.GUEST_HEADERS), ['g001', 'Tutu', '男方朋友', '5', 2, '', '', '', '', '']]);
+  const guests = sheetDouble('Guests', [Array.from(headers.GUEST_HEADERS), ['G010', 'Tutu', '男方朋友', '5', 2]]);
   const gifts = sheetDouble('Gifts', [Array.from(headers.GIFT_HEADERS)]);
   let reads = 0;
   let locks = 0;
@@ -221,8 +221,11 @@ test('正式 API adapter 每次只讀取兩表各一次；查詢零鎖零 flush�
     SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: name => name === 'Guests' ? guests : gifts }), flush: () => { flushes++; } },
     LockService: { getScriptLock: () => ({ tryLock: () => { locks++; return true; }, releaseLock() {} }) }
   });
-  const call = action => api.handleGiftApi_({ action, guestId: 'g001', sessionToken: 'test-token', requestId: 'test-request' }, now);
+  const call = (action, guestId = 'https://example.test/?t=G010') => api.handleGiftApi_({
+    action, guestId, sessionToken: 'test-token', requestId: 'test-request'
+  }, now);
   const result = call('guest');
+  assert.equal(result.guestId, 'PM0A');
   assert.equal(result.tableNo, '5');
   assert.equal(reads, 2);
   assert.equal(locks, 0);
@@ -230,13 +233,16 @@ test('正式 API adapter 每次只讀取兩表各一次；查詢零鎖零 flush�
   assert.equal(result.lockWaitMs, 0);
   assert.ok(result.serverMs >= 0);
   reads = 0;
-  assert.equal(call('receive').status, 'RECEIVED');
+  assert.equal(call('receive', 'pm0a').status, 'RECEIVED');
+  assert.equal(gifts.data[1][1], 'PM0A');
   assert.equal(reads, 2);
   assert.equal(locks, 1);
   assert.equal(flushes, 1);
   gifts.data[1][4] = '已清點';
   gifts.data[1][5] = 3600;
   assert.equal(call('guest').giftState, '已清點', '不快取過時收件狀態');
+  assert.equal(call('receive').status, 'REPLAY');
+  assert.equal(gifts.data.length, 2);
 });
 
 test('登入快照一次讀取賓客與禮金，提供本機查詢所需狀態', () => {
@@ -258,7 +264,7 @@ test('登入快照一次讀取賓客與禮金，提供本機查詢所需狀態',
 
   assert.deepEqual(reads, ['Guests', 'Gifts']);
   assert.equal(snapshot.guests.length, 2);
-  assert.equal(snapshot.guests[0].guestId, 'g001');
+  assert.equal(snapshot.guests[0].guestId, 'PM01');
   assert.equal(snapshot.guests[0].tableNo, '5');
   assert.equal(snapshot.guests[0].members, '同行甲');
   assert.equal(snapshot.guests[0].partySize, 2);
@@ -292,7 +298,7 @@ test('建立 session 時可在同一次 API 回應帶回登入快照', () => {
   assert.equal(result.status, 'SESSION_CREATED');
   assert.equal(result.sessionToken, 'session-token');
   assert.equal(result.guests.length, 1);
-  assert.equal(result.guests[0].guestId, 'g001');
+  assert.equal(result.guests[0].guestId, 'PM01');
   assert.ok(result.serverMs >= 0);
 });
 

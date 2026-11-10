@@ -2,6 +2,14 @@
 export const HEADERS = ['賓客ID', '顯示姓名', '新郎/新娘方', '桌號', '備註', '同行姓名', '人數', '喜餅共領ID'];
 export const CAKE_HEADERS = ['喜餅共領ID', '共領名稱', '西式配額', '中式配額'];
 const normalize = value => String(value ?? '').normalize('NFKC').trim().replace(/\s+/g, '').toLowerCase();
+const formatPm = number => 'PM' + number.toString(16).toUpperCase().padStart(2, '0');
+function canonicalId(value) {
+  const id = String(value ?? '').trim();
+  if (/^PM[0-9A-F]{2}$/i.test(id)) return id.toUpperCase();
+  const old = id.match(/^G(\d+)$/i);
+  const number = old ? Number(old[1]) : 0;
+  return number > 0 && number <= 255 ? formatPm(number) : id;
+}
 const number = value => {
   if (value === '' || value == null) return '';
   const result = Number(value);
@@ -14,11 +22,13 @@ export function prepareReceptionImport({ qrRows, existingGuestRows, receiptRows 
     '喜餅共領編號', '喜餅共領單位', '西式配額（共領總數）', '中式配額（共領總數）'];
   if (expected.some((header, i) => qrRows[0]?.[i] !== header)) throw new Error('QR來源欄位不符');
   if (HEADERS.slice(0, 5).some((header, i) => existingGuestRows[0]?.[i] !== header)) throw new Error('既有Guests欄位不符');
-  const old = existingGuestRows.slice(1).filter(row => row[0]);
+  const old = existingGuestRows.slice(1).filter(row => row[0])
+    .map(([id, ...rest]) => [canonicalId(id), ...rest]);
   const used = new Set(old.map(row => String(row[0])));
   if (used.size !== old.length) throw new Error('既有賓客ID重複');
   const claimed = new Set(), cakes = new Map(), cards = new Set(), mapping = [];
-  let sequence = old.reduce((max, row) => /^G\d+$/i.test(row[0]) ? Math.max(max, Number(row[0].slice(1))) : max, 0) + 1;
+  let sequence = [...used].reduce((max, id) => /^PM[0-9A-F]{2}$/.test(id)
+    ? Math.max(max, parseInt(id.slice(2), 16)) : max, 0) + 1;
   const guests = qrRows.slice(1).filter(row => row[0]).map(row => {
     const [card, title, members, table, size, category, cakeId, cakeName, western, chinese] = row;
     if (!title || !members || !cakeId || !cakeName || !table || !category || number(size) < 1) throw new Error('來源缺少必要資料：' + card);
@@ -29,8 +39,10 @@ export function prepareReceptionImport({ qrRows, existingGuestRows, receiptRows 
     const matches = old.filter(item => names.includes(normalize(item[1])));
     if (matches.length > 1) throw new Error('舊名單對應不唯一：' + card);
     let id = matches[0]?.[0];
-    if (!id) { while (used.has('G' + String(sequence).padStart(3, '0'))) sequence++;
-      id = 'G' + String(sequence++).padStart(3, '0'); used.add(id); }
+    if (!id) {
+      if (sequence > 255) throw new Error('PM01–PMFF 賓客編號已用完');
+      id = formatPm(sequence++);
+    }
     if (claimed.has(id)) throw new Error('兩張卡不可使用同一賓客ID：' + id);
     claimed.add(id);
     const cake = [cakeId, cakeName, number(western), number(chinese)];
@@ -47,7 +59,7 @@ export function prepareReceptionImport({ qrRows, existingGuestRows, receiptRows 
       ? members + '；其他稱呼：' + oldName : members;
     return [id, String(title).replace(/與同行者$/, ''), category, String(table), notes, searchableMembers, number(size), cakeId];
   });
-  const referenced = new Set(receiptRows.slice(1).filter(row => row[0] && row[1]).map(row => String(row[1])));
+  const referenced = new Set(receiptRows.slice(1).filter(row => row[0] && row[1]).map(row => canonicalId(row[1])));
   const missing = [...referenced].filter(id => !claimed.has(id));
   if (missing.length) throw new Error('已有紅包引用的ID未對應到新名單：' + missing.join('、'));
   return { guests: [HEADERS, ...guests], cakeGroups: [CAKE_HEADERS, ...cakes.values()], mapping,

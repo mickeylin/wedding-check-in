@@ -10,7 +10,7 @@ test('匯入保留既有ID、新編號避開所有舊ID，配額按共領ID去�
   const { HEADERS, prepareReceptionImport } = await load();
   const existingGuestRows = [HEADERS, ['G001', '成哥'], ['G100', '已移除舊人']];
   const result = prepareReceptionImport({ qrRows: source(), existingGuestRows, receiptRows: [['id', 'guest'], ['receipt', 'G001']] });
-  assert.equal(result.guests[1][0], 'G001'); assert.equal(result.guests[2][0], 'G101');
+  assert.equal(result.guests[1][0], 'PM01'); assert.equal(result.guests[2][0], 'PM65');
   assert.equal(result.cakeGroups.length, 2); assert.equal(result.cakeGroups[1][3], '');
   assert.equal(result.summary.people, 3); assert.equal(result.guests[1].length, 8);
   const again = prepareReceptionImport({ qrRows: source(), existingGuestRows: result.guests });

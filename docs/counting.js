@@ -120,10 +120,12 @@
   }
   function render() {
     const query = el.countSearch.value.trim().toLowerCase();
+    const idQuery = typeof canonicalGuestId === 'function' ? canonicalGuestId(query).toLowerCase() : query;
     const state = el.countFilter.value;
     const visible = records.filter(record => (!state || record.state === state) &&
-      (!query || [record.envelopeCode, record.guestId, record.displayName, record.signature]
-        .some(value => String(value || '').toLowerCase().includes(query))));
+      (!query || String(record.guestId || '').toLowerCase().includes(idQuery)
+        || [record.envelopeCode, record.displayName, record.signature]
+          .some(value => String(value || '').toLowerCase().includes(query))));
     const total = records.filter(record => record.state === '已清點')
       .reduce((sum, record) => sum + Math.round(Number(record.amount || 0) * 100), 0) / 100;
     el.countSummary.textContent = loaded

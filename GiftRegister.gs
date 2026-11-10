@@ -3,7 +3,7 @@ const GIFT_HEADERS = ['收件ID', '賓客ID', '顯示姓名', '紅包署名', '�
   '收件人員', '收件時間', '清點人員', '清點時間', '備註', '收件請求ID',
   '撤銷人員', '撤銷時間', '撤銷請求ID', '紅包編號', '例外類型'];
 const GIFT_AUDIT_HEADERS = ['時間', '操作人員', '動作', '收件ID', '賓客ID', '變更內容'];
-const GIFT_GUEST_CACHE_KEY = 'GIFT_GUEST_SNAPSHOT_V2';
+const GIFT_GUEST_CACHE_KEY = 'GIFT_GUEST_SNAPSHOT_V3';
 
 function setupGiftRegister_(ss) {
   const gifts = requireGiftSchema_(ss, 'Gifts', GIFT_HEADERS, true);
@@ -45,7 +45,7 @@ function requireGiftSchema_(ss, name, headers, create) {
 }
 
 function giftRecord_(row, rowNumber) {
-  return { rowNumber, receiptId: String(row[0] || ''), guestId: String(row[1] || '').trim(),
+  return { rowNumber, receiptId: String(row[0] || ''), guestId: canonicalGuestId_(row[1]),
     displayName: String(row[2] || ''), signature: String(row[3] || ''), state: String(row[4] || ''),
     amount: row[5], receivedBy: row[6], receivedAt: row[7], countedBy: row[8], countedAt: row[9],
     notes: row[10], requestId: String(row[11] || ''), cancelledBy: row[12], cancelledAt: row[13],
@@ -95,6 +95,9 @@ function createGiftSnapshot_(ss) {
       notes: guest.notes
     }, giftStatus_(giftsByGuest[guest.guestId] || [])));
 
+  if (new Set(guests.map(guest => guest.guestId)).size !== guests.length) {
+    throw apiError_('CONFIG_ERROR', '賓客編號重複，請先整理名單');
+  }
   cacheGiftGuests_(guests);
   return { guests, snapshotCreatedAt: new Date().toISOString() };
 }
@@ -241,7 +244,7 @@ function handleGiftApi_(payload, now) {
       if (GUEST_HEADERS.some((header, i) => !values[0] || values[0][i] !== header)) {
         throw apiError_('CONFIG_ERROR', 'Guests 欄位順序不符，請先執行 setupSheet');
       }
-      const rows = values.slice(1).filter(row => String(row[0] || '').trim() === guestId);
+      const rows = values.slice(1).filter(row => canonicalGuestId_(row[0]) === guestId);
       if (rows.length > 1) throw apiError_('CONFIG_ERROR', '賓客編號重複，請先整理名單');
       return rows.length ? guestRecordFromRow_(rows[0]) : null;
     } finally {
@@ -267,7 +270,7 @@ function handleGiftApi_(payload, now) {
       };
     })(), clock: () => now, uuid: () => Utilities.getUuid() });
   const result = module.execute(Object.assign({}, payload, {
-    guestId: extractGuestId_(payload.guestId), operator: session.operator
+    guestId: canonicalGuestId_(extractGuestId_(payload.guestId)), operator: session.operator
   }));
   return Object.assign(result, { serverMs: Date.now() - started, lockWaitMs,
     authMs, guestLookupMs, giftReadMs, giftWriteMs, flushMs });

@@ -65,6 +65,7 @@ function handleCountApi_(payload, now) {
   if (!/^[a-zA-Z0-9_-]{8,100}$/.test(requestId)) throw apiError_('BAD_REQUEST', '缺少有效請求編號');
   const input = countInput_(payload.data, payload.action === 'receiveExtra');
   const fingerprint = countHash_({ operator: session.operator, input });
+  const guestId = canonicalGuestId_(input.guestId);
   return createScriptLock_(20000).runExclusive(() => {
     const audit = requireGiftSchema_(ss, 'GiftAudit', GIFT_AUDIT_HEADERS);
     const auditRows = audit.getRange(1, 1, Math.max(1, audit.getLastRow()), GIFT_AUDIT_HEADERS.length).getValues();
@@ -91,13 +92,13 @@ function handleCountApi_(payload, now) {
         throw apiError_('BAD_REQUEST', '第二包請使用例外狀況新增紅包，勿改寫目前這包');
       }
       let after = before ? before.slice() : Array(GIFT_HEADERS.length).fill('');
-      if (before && input.guestId !== String(before[1] || '')) {
+      if (before && guestId !== canonicalGuestId_(before[1])) {
         if (before[1]) throw apiError_('BAD_REQUEST', '已有賓客關聯不可直接更換，請管理者核對');
-        if (input.guestId) {
+        if (guestId) {
           const matches = requireGiftSchema_(ss, 'Guests', GUEST_HEADERS).getDataRange().getValues().slice(1)
-            .filter(row => String(row[0]).toLowerCase() === input.guestId.toLowerCase());
+            .filter(row => canonicalGuestId_(row[0]).toLowerCase() === guestId.toLowerCase());
           if (matches.length !== 1) throw apiError_('BAD_REQUEST', '找不到唯一賓客編號');
-          after[1] = String(matches[0][0]); after[2] = String(matches[0][1]);
+          after[1] = canonicalGuestId_(matches[0][0]); after[2] = String(matches[0][1]);
         }
       }
       if (!before) {
@@ -107,11 +108,11 @@ function handleCountApi_(payload, now) {
         if (input.guestId) {
           const guestSheet = requireGiftSchema_(ss, 'Guests', GUEST_HEADERS);
           const matches = guestSheet.getDataRange().getValues().slice(1)
-            .filter(row => String(row[0]).toLowerCase() === input.guestId.toLowerCase());
+            .filter(row => canonicalGuestId_(row[0]).toLowerCase() === guestId.toLowerCase());
           if (matches.length !== 1) throw apiError_('BAD_REQUEST', '找不到唯一賓客編號，請先確認名單');
           guest = guestRecordFromRow_(matches[0]);
         }
-        if (input.exceptionType === '多包' && !rows.some(row => row[1] === guest.guestId && row[4] !== '已撤銷')) {
+        if (input.exceptionType === '多包' && !rows.some(row => canonicalGuestId_(row[1]) === guest.guestId && row[4] !== '已撤銷')) {
           throw apiError_('BAD_REQUEST', '此賓客尚無第一包收件，請先從接待收件登記');
         }
         // Include reserved codes from unfinished audit operations; never reuse a bag number.
