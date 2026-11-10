@@ -92,18 +92,11 @@ function createGiftSnapshot_(ss) {
       displayName: guest.displayName,
       category: guest.category,
       tableNo: guest.tableNo, members: guest.members, partySize: guest.partySize,
-      cakeGroupId: guest.cakeGroupId, notes: guest.notes
+      notes: guest.notes
     }, giftStatus_(giftsByGuest[guest.guestId] || [])));
 
   cacheGiftGuests_(guests);
-  const snapshot = { guests, snapshotCreatedAt: new Date().toISOString() };
-  if (typeof createCakeSnapshot_ === 'function') {
-    // Cake preview is optional: an unavailable cake table must not prevent
-    // reception login or envelope receipts. A later cake lookup fails closed.
-    try { snapshot.cakeSnapshot = createCakeSnapshot_(ss); }
-    catch (err) { snapshot.cakeSnapshotUnavailable = true; }
-  }
-  return snapshot;
+  return { guests, snapshotCreatedAt: new Date().toISOString() };
 }
 
 function cacheGiftGuests_(guests) {
@@ -114,7 +107,7 @@ function cacheGiftGuests_(guests) {
       displayName: guest.displayName,
       category: guest.category,
       tableNo: guest.tableNo, members: guest.members, partySize: guest.partySize,
-      cakeGroupId: guest.cakeGroupId, notes: guest.notes
+      notes: guest.notes
     };
   });
   safeCachePut_(GIFT_GUEST_CACHE_KEY, JSON.stringify(guestIndex), SCRIPT_CACHE_MAX_TTL_SECONDS);
@@ -144,7 +137,7 @@ function createGiftModule_(deps) {
         const response = (status, message) => Object.assign({ ok: true, status, message,
           guestId: guest.guestId, displayName: guest.displayName, tableNo: guest.tableNo,
           category: guest.category, members: guest.members, partySize: guest.partySize,
-          cakeGroupId: guest.cakeGroupId, notes: guest.notes }, giftStatus_(forGuest()));
+          notes: guest.notes }, giftStatus_(forGuest()));
         if (input.action === 'guest') return response('GUEST_FOUND', '查詢不會登記收到紅包');
         if (!input.requestId || !input.operator) throw apiError_('BAD_REQUEST', '缺少操作人員或請求編號');
         // A retry of a previous receive must not resurrect an already cancelled envelope.

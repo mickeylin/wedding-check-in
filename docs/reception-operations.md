@@ -6,7 +6,7 @@
 
 `Guests` 只保留八欄，前五欄與既有部署相容：賓客ID、顯示姓名、新郎/新娘方、桌號、備註、同行姓名、人數、喜餅共領ID。「新郎/新娘方」沿用既有欄名，值可為名單實際分類，例如麥當勞、湖畔咖啡。搜尋涵蓋顯示姓名、同行姓名、已確認舊稱與ID；分類選項由登入快照產生。
 
-用 `CakeGroups` 的配額核對印卡清單。先前線上發放的紀錄可查 `CakeLog`。
+用 `CakeGroups` 的配額與 `Guests` 的喜餅共領 ID 核對印卡清單。
 
 `Gifts`、`GiftAudit`、`GiftDashboard` 繼續使用。紅包收件先保存於裝置，再背景同步。
 
@@ -34,12 +34,14 @@
 
 ## 部署與驗收
 
-1. 備份正式Sheet，暫停接待。四份Apps Script來源須一起更新：`Code.gs`、`GiftRegister.gs`、`CountGifts.gs`、新增的 `Reception.gs`。
-2. 執行 `setupSheet`，確認Guests前八欄與CakeGroups、CakeLog欄序；若F:H有自訂欄則停止，先備份移開。沿用原API_PIN、SPREADSHEET_ID與原Web App網址，不在公開程式碼存PIN。
+1. 備份正式 Sheet 後，將 `Code.gs`、`GiftRegister.gs`、`CountGifts.gs` 放入 Apps Script。從舊版升級時移除專案中的 `Reception.gs`。
+2. 初次安裝時執行 `setupSheet`，確認 Guests 前七欄。若 F:G 有自訂欄，先備份移開。從舊版升級可沿用既有的 PIN、試算表與 Web App 網址。
 3. 更新Web App部署版本，再發布 `docs/` 前端，工作人員重新登入下載最新名單。新版快取使用V2鍵，不沿用舊的五欄賓客快取。
 4. QR內容使用正式賓客ID，不使用QR001等排版卡號。既有已被紅包引用的ID不可改配別人。名單更動或重排後不可重新分配已使用的共領ID。
 5. 驗收同行姓名查詢、掃碼收件、離線收件同步、第二包 E 編號、婚宴後清點及返回現場接待。印卡前逐一核對共領代表卡與卡片色帶。
 
 前端使用固定的 Apps Script 網址，工作人員只需填姓名與 PIN。
+
+部署新版 Apps Script 並驗證登入、收件及清點後，即可移除舊的 `CakeLog` 工作表。印卡仍使用 `CakeGroups` 和喜餅共領 ID。
 
 2026-10-29 已更新指定正式Sheet的Guests八欄名單與CakeGroups配額，建立空CakeLog，保留既有Gifts與GiftAudit，舊Guests另存隱藏備份。原有兩筆收件沒有刪除；正式使用前請管理者核對，勿把歷史待清點直接當作婚宴當日已收到。資料更新不等於Apps Script或GitHub Pages已部署。本機測試不代表正式雙手機驗收。

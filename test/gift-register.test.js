@@ -242,21 +242,27 @@ test('正式 API adapter 每次只讀取兩表各一次；查詢零鎖零 flush�
 test('登入快照一次讀取賓客與禮金，提供本機查詢所需狀態', () => {
   const headers = load();
   const guests = sheetDouble('Guests', [
-    Array.from(headers.GUEST_HEADERS),
-    ['g001', 'Tutu', '新郎朋友', '5', 2, '', '', '', '', ''],
-    ['g002', '另一位', '新娘朋友', '8', 1, '', '', '', '', '']
+    Array.from(headers.GUEST_HEADERS).concat(['同行姓名', '人數', '喜餅共領ID']),
+    ['g001', 'Tutu', '新郎朋友', '5', 2, '同行甲', 2, 'C001'],
+    ['g002', '另一位', '新娘朋友', '8', 1, '', '']
   ]);
   const gifts = sheetDouble('Gifts', [
     Array.from(headers.GIFT_HEADERS),
     ['receipt-1', 'g001', 'Tutu', '', '待清點', '', '工作人員', new Date(), '', '', '', 'request-1', '', '', '']
   ]);
-  const snapshot = headers.createGiftSnapshot_({
-    getSheetByName: name => name === 'Guests' ? guests : gifts
-  });
+  const reads = [];
+  const snapshot = headers.createGiftSnapshot_({ getSheetByName(name) {
+    reads.push(name);
+    return { Guests: guests, Gifts: gifts }[name];
+  } });
 
+  assert.deepEqual(reads, ['Guests', 'Gifts']);
   assert.equal(snapshot.guests.length, 2);
   assert.equal(snapshot.guests[0].guestId, 'g001');
   assert.equal(snapshot.guests[0].tableNo, '5');
+  assert.equal(snapshot.guests[0].members, '同行甲');
+  assert.equal(snapshot.guests[0].partySize, 2);
+  assert.equal(snapshot.guests[1].partySize, null);
   assert.equal(snapshot.guests[0].giftState, '待清點');
   assert.equal(snapshot.guests[1].giftState, '未收件');
 });

@@ -16,7 +16,7 @@ function fixture({ local = new Map(), online = true, respond, operator = '甲', 
     document: { querySelector: get, createElement: node },
     window: { localStorage: { getItem: k => local.get(k), setItem: (k, v) => local.set(k, v), removeItem: k => local.delete(k) },
       confirm: () => true, addEventListener() {} },
-    selectedGuest: { ok: true, guestId: 'G1', members: '成哥、家人', partySize: 3, cakeGroupId: 'C1' },
+    selectedGuest: { ok: true, guestId: 'G1', members: '成哥、家人', partySize: 3 },
     getSettings: () => ({ apiUrl: 'https://api.test/exec' }), readSessionOperator: () => operator,
     ensureSession: async () => { if (ensure) ensure(ctx); return true; }, readSessionToken: () => 'token',
     isBrowserOnline: () => online, messageOf: e => e.message, createRequestId: () => 'request-unique',
@@ -50,9 +50,9 @@ test('例外收件逾時後保留原請求，重新開啟可核對並取得 E �
   assert.equal(local.size, 0);
 });
 
-test('舊版待核對的喜餅操作僅由原人員及原帳本重試', async () => {
-  const local = new Map([['wedding-reception-operation-v1', JSON.stringify({ action: 'cakeIssue', guestId: 'G1',
-    apiUrl: 'https://api.test/exec', operator: '甲', requestId: 'original-request', attempts: 1, data: { western: 1, chinese: 0 } })]]);
+test('待核對的例外收件僅由原人員及原帳本重試', async () => {
+  const local = new Map([['wedding-reception-operation-v1', JSON.stringify({ action: 'receiveExtra', guestId: 'G1',
+    apiUrl: 'https://api.test/exec', operator: '甲', requestId: 'original-request', attempts: 1, data: { signature: '家人' } })]]);
   const other = fixture({ local, operator: '乙' }); await other.click('#receptionRetry');
   assert.equal(other.calls.length, 0); assert.equal(local.size, 1);
   const refreshed = fixture({ local, ensure: c => { c.readSessionOperator = () => '乙'; } }); await refreshed.click('#receptionRetry');
@@ -61,12 +61,26 @@ test('舊版待核對的喜餅操作僅由原人員及原帳本重試', async ()
   differentApi.ctx.getSettings = () => ({ apiUrl: 'https://other.test/exec' });
   await differentApi.click('#receptionRetry');
   assert.equal(differentApi.calls.length, 0); assert.equal(local.size, 1);
-  const original = fixture({ local, respond: () => ({ ok: true, status: 'CAKE_REPLAY' }) });
+  const original = fixture({ local });
   await original.click('#receptionRetry');
-  assert.equal(original.calls[0].action, 'cakeIssue');
+  assert.equal(original.calls[0].action, 'receiveExtra');
   assert.equal(original.calls[0].requestId, 'original-request');
-  assert.match(original.get('#receptionFeedback').textContent, /已核對/);
+  assert.match(original.get('#receptionFeedback').textContent, /E001/);
   assert.equal(local.size, 0);
+});
+
+test('舊發餅待辦不重送，也不阻擋例外紅包收件', async () => {
+  const key = 'wedding-reception-operation-v1';
+  for (const action of ['cakeIssue', 'cakeCancel']) {
+    const local = new Map([[key, JSON.stringify({ action, requestId: 'old-cake-operation' })]]);
+    const f = fixture({ local });
+    assert.equal(local.has(key), false);
+    await f.click('#receptionRetry');
+    await f.show();
+    f.get('#extraEnvelopeSignature').value = '測試署名';
+    await f.click('#receiveExtraButton');
+    assert.deepEqual(f.calls.map(call => call.action), ['receiveExtra']);
+  }
 });
 test('第二包由接待登記待清點，金額留白且E編號留在視窗', async () => {
   const f = fixture({ respond: r => r.action === 'receiveExtra'

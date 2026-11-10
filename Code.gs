@@ -1,5 +1,4 @@
 const GUEST_HEADERS = ['賓客ID', '顯示姓名', '新郎/新娘方', '桌號', '備註'];
-const RECEPTION_GUEST_HEADERS = GUEST_HEADERS.concat(['同行姓名', '人數', '喜餅共領ID']);
 const LEGACY_GUEST_HEADERS = ['預計人數', '實到人數', '報到狀態', '操作人員', '報到時間'];
 
 const API_STATION_NAME = 'GitHubPages';
@@ -25,7 +24,14 @@ function setupSheet() {
     }
   });
   setupGiftRegister_(ss);
-  if (typeof setupReception_ === 'function') setupReception_(ss);
+  const companionHeaders = ['同行姓名', '人數'];
+  const companionRange = guestSheet.getRange(1, 6, 1, companionHeaders.length);
+  const existingCompanionHeaders = companionRange.getValues()[0];
+  if (companionHeaders.some((header, i) => existingCompanionHeaders[i] && existingCompanionHeaders[i] !== header)) {
+    throw apiError_('CONFIG_ERROR', 'Guests F:G 有其他欄位，請先備份及移開後再初始化');
+  }
+  companionRange.setValues([companionHeaders]);
+  safeCacheRemove_(GIFT_GUEST_CACHE_KEY);
 
   return '數位禮金簿初始化完成；請另執行 installGiftEditTrigger';
 }
@@ -102,7 +108,7 @@ function doGet(e) {
       requestId: String(params.requestId || '').trim(),
       receiptId: String(params.receiptId || '').trim()
     };
-  } else if (['countList', 'countSave', 'receiveExtra', 'cakeStatus', 'cakeIssue', 'cakeCancel'].indexOf(params.action) !== -1) {
+  } else if (['countList', 'countSave', 'receiveExtra'].indexOf(params.action) !== -1) {
     payload = { action: params.action, sessionToken: String(params.sessionToken || ''),
       guestId: String(params.guestId || ''), requestId: String(params.requestId || ''), data: String(params.data || '') };
   } else if (params.action === 'lookup') {
@@ -267,8 +273,7 @@ function guestRecordFromRow_(row) {
     tableNo: String(row[GUEST_COL['桌號']] || '').trim(),
     notes: String(row[GUEST_COL['備註']] || '').trim(),
     members: String(row[5] || '').trim(),
-    partySize: row[6] === '' || row[6] == null ? null : Number(row[6]),
-    cakeGroupId: String(row[7] || '').trim()
+    partySize: row[6] === '' || row[6] == null ? null : Number(row[6])
   };
 }
 
@@ -341,9 +346,6 @@ function safeApiCall_(payload, now) {
       });
     }
 
-    if (['cakeStatus', 'cakeIssue', 'cakeCancel'].indexOf(payload.action) !== -1) {
-      return handleCakeApi_(payload, now);
-    }
     if (['countList', 'countSave', 'receiveExtra'].indexOf(payload.action) !== -1) {
       return handleCountApi_(payload, now);
     }
@@ -606,8 +608,7 @@ function createGuestLookupModule_(dependencies) {
         displayName: guest.displayName,
         category: guest.category,
         tableNo: guest.tableNo,
-        notes: guest.notes || '', members: guest.members || '', partySize: guest.partySize,
-        cakeGroupId: guest.cakeGroupId || ''
+        notes: guest.notes || '', members: guest.members || '', partySize: guest.partySize
       }));
       return {
         ok: true,

@@ -1,5 +1,4 @@
-/* Exception receipts and any pending operation from the previous version
- * keep the original request across timeouts and reloads. */
+/* Exception receipts keep the original request across timeouts and reloads. */
 (() => {
   const ids = ['partyMembers', 'partyNotes', 'partySize', 'partyAlert', 'guestDetails',
     'receptionPending',
@@ -85,7 +84,7 @@
         throw new Error('工作階段已變更，請原操作人員登入原 API 再核對');
       }
       const result = await jsonpRequest({ ...getSettings(), apiUrl: operation.apiUrl }, {
-        action: operation.action, guestId: operation.guestId, sessionToken: token,
+        action: 'receiveExtra', guestId: operation.guestId, sessionToken: token,
         requestId: operation.requestId, data: JSON.stringify(operation.data)
       });
       if (!result.ok) {
@@ -94,23 +93,17 @@
         }
         // Only explicit pre-write rejections are safe to remove. Unknown errors
         // and network failures retain the request because a write may exist.
-        if (['BAD_REQUEST', 'NOT_FOUND', 'UNKNOWN_QUOTA', 'ALREADY_ISSUED', 'ALREADY_CANCELLED'].includes(result.status)) {
+        if (['BAD_REQUEST', 'NOT_FOUND'].includes(result.status)) {
           persist(null);
         }
         throw new Error(result.message || '結果尚未確認');
       }
       if (!persist(null)) throw new Error('伺服器已處理，但本機無法清除待核對操作，請先人工核對');
       const repeated = operation.attempts > 1 || /REPLAY/.test(result.status);
-      if (operation.action === 'receiveExtra') {
-        const code = result.record?.envelopeCode;
-        notice('例外紅包已登記。請在這包紅包寫上 ' + code + '，金額回家再清點。' +
-          (repeated ? '這是原操作結果，請勿新增第二筆。' : ''));
-        el.partyNotes.textContent = '這包紅包標記：' + code;
-        // Keep the E code visible until the operator moves to the next guest.
-        // A new lookup refreshes the envelope count from the server.
-      } else {
-        notice('舊版喜餅操作已核對。請確認實體交付情況。');
-      }
+      const code = result.record?.envelopeCode;
+      notice('例外紅包已登記。請在這包紅包寫上 ' + code + '，金額回家再清點。' +
+        (repeated ? '這是原操作結果，請勿新增第二筆。' : ''));
+      el.partyNotes.textContent = '這包紅包標記：' + code;
     } catch (err) {
       notice(messageOf(err) + (pending ? '。原操作仍保留，請按「核對原操作結果／重試」，勿重複操作。' : ''));
     } finally { busy = false; controls(); }
@@ -130,8 +123,15 @@
   el.receptionRetry.addEventListener('click', send);
   window.addEventListener('online', controls); window.addEventListener('offline', controls);
   try {
-    pending = JSON.parse(window.localStorage.getItem(KEY) || 'null');
-    if (pending && (!pending.requestId || !pending.operator || !pending.apiUrl || !pending.action || !pending.data)) throw new Error('invalid operation');
+    const saved = JSON.parse(window.localStorage.getItem(KEY) || 'null');
+    if (['cakeIssue', 'cakeCancel'].includes(saved?.action)) {
+      if (persist(null)) notice('舊版發餅操作已停止同步，請依卡片及實際發放情況核對。');
+    } else if (saved) {
+      if (saved.action !== 'receiveExtra' || !saved.requestId || !saved.operator || !saved.apiUrl || !saved.data) {
+        throw new Error('invalid operation');
+      }
+      pending = saved;
+    }
   } catch (err) { storageAvailable = false; notice('待核對操作無法讀取，請人工核對後再使用。'); }
   window.Reception = { show, isBusy: () => busy };
   controls();

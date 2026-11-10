@@ -6,7 +6,7 @@ const test = require('node:test');
 
 function fixture() {
   let serial = 0, fail = '', flushes = 0;
-  const source = ['Code.gs', 'GiftRegister.gs', 'CountGifts.gs', 'Reception.gs'].map(p => fs.readFileSync(p, 'utf8')).join('\n');
+  const source = ['Code.gs', 'GiftRegister.gs', 'CountGifts.gs'].map(p => fs.readFileSync(p, 'utf8')).join('\n');
   const tables = {};
   function sheet(name, rows) {
     const data = rows;
