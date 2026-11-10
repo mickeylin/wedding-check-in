@@ -34,12 +34,6 @@
       <strong>準備接待</strong><span>先登入下載名單，即可掃描或查找賓客。</span>
     </div>
 
-    <button id="receptionMode" type="button" aria-pressed="true">現場接待</button>
-    <details class="panel" id="afterWeddingTools">
-      <summary>婚宴後使用</summary>
-      <button id="countingMode" type="button" class="secondary-button" aria-pressed="false">回家清點紅包</button>
-      <p>現場只登記收到紅包，金額回家再填。</p>
-    </details>
     <section class="panel" id="receptionPending" hidden aria-live="polite">
       <p id="receptionPendingText"></p>
       <button type="button" id="receptionRetry">核對原操作結果／重試</button>
@@ -47,7 +41,10 @@
     <section class="panel" id="receptionNotice" hidden aria-live="polite"></section>
     <button id="unlistedEnvelope" type="button" class="secondary-button">名單外／代送紅包</button>
     <section id="countingPanel" class="panel counting-panel" aria-labelledby="countingTitle" hidden>
-      <h2 id="countingTitle">紅包清點</h2>
+      <div class="section-header">
+        <h2 id="countingTitle" tabindex="-1">紅包清點</h2>
+        <button id="receptionMode" type="button" class="secondary-button compact-button">← 返回現場接待</button>
+      </div>
       <p id="countStatus" role="status" aria-live="polite"></p>
       <section id="countQueueSection" class="count-queue" aria-label="清點同步" hidden>
         <div class="section-header">
@@ -117,7 +114,7 @@
     </section>
     <section id="receptionScanner" class="panel scanner-panel" aria-labelledby="scannerTitle">
       <div class="section-header">
-        <h2 id="scannerTitle">掃 QR ／輸入編號</h2>
+        <h2 id="scannerTitle" tabindex="-1">掃 QR ／輸入編號</h2>
         <div class="button-row">
           <button id="startButton" type="button">開始掃描</button>
           <button id="stopButton" class="secondary-button" type="button" disabled>停止</button>
@@ -179,6 +176,11 @@
       <button id="clearCompletedGiftQueueButton" class="secondary-button" type="button" hidden>清除完成紀錄</button>
     </section>
     <details class="panel history-panel" hidden><summary>最近操作</summary><ol id="recentList" class="recent-list"></ol></details>
+    <details class="panel" id="afterWeddingTools">
+      <summary>婚宴後使用</summary>
+      <button id="countingMode" type="button" class="secondary-button">回家清點紅包</button>
+      <p>現場只登記收到紅包，金額回家再填。</p>
+    </details>
   </main>
 
   <div
@@ -242,7 +244,7 @@
   <script src="./gift-queue.js?v=610add030021"></script>
   <script src="./app.js?v=f93881c18cc5"></script>
   <script src="./count-queue.js?v=e9c5a9cff383"></script>
-  <script src="./counting.js?v=141e917018b9"></script>
+  <script src="./counting.js?v=9faab65d8fc5"></script>
   <script src="./reception.js?v=2767493ba5cc"></script>
 </body>
 </html>

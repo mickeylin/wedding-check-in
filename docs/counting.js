@@ -2,6 +2,7 @@
  * device, then sent in the background with one immutable request id. */
 (() => {
   const ids = ['receptionMode', 'countingMode', 'countingPanel', 'receptionScanner', 'receptionLookup', 'unlistedEnvelope',
+    'afterWeddingTools', 'countingTitle', 'scannerTitle',
     'countRefresh', 'countException', 'countStatus', 'countRetry', 'countQueueSection', 'countQueueSummary', 'countQueueList',
     'countEditor', 'countEditorTitle', 'countReceiptInfo', 'countFields', 'countGuestGroup', 'countGuestId',
     'countType', 'countSignature', 'countAmount', 'countNotesLabel', 'countNotes', 'countReasonGroup',
@@ -341,11 +342,14 @@
     el.countingPanel.hidden = !counting;
     el.receptionScanner.hidden = counting; el.receptionLookup.hidden = counting;
     el.unlistedEnvelope.hidden = counting;
-    el.countingMode.setAttribute('aria-pressed', String(counting));
-    el.receptionMode.setAttribute('aria-pressed', String(!counting));
-    el.countingMode.className = counting ? '' : 'secondary-button';
-    el.receptionMode.className = counting ? 'secondary-button' : '';
-    if (counting && !loaded && !draft) await refresh();
+    el.afterWeddingTools.hidden = counting;
+    el.afterWeddingTools.open = false;
+    if (counting) {
+      (draft ? el.countEditorTitle : el.countingTitle).focus();
+      if (!loaded && !draft) await refresh();
+    } else {
+      el.scannerTitle.focus();
+    }
   }
 
   el.countingMode.addEventListener('click', () => mode(true));

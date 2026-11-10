@@ -204,7 +204,9 @@ test('一般清點隱藏重複賓客編號與更正原因，已清點更正才�
 
 test('未修改清點內容時返回清單不跳確認', async () => {
   const f = fixture();
+  f.get('afterWeddingTools').open = true;
   await f.fire('countingMode');
+  assert.equal(f.get('afterWeddingTools').hidden, true);
   await f.get('countRecords').children[0].handlers.click();
 
   await f.fire('countClose');
@@ -212,6 +214,14 @@ test('未修改清點內容時返回清單不跳確認', async () => {
   assert.equal(f.confirmCalls(), 0);
   assert.equal(f.get('countEditor').hidden, true);
   assert.equal(f.get('countBrowser').hidden, false);
+
+  await f.fire('receptionMode');
+
+  assert.equal(f.get('countingPanel').hidden, true);
+  assert.equal(f.get('receptionScanner').hidden, false);
+  assert.equal(f.get('receptionLookup').hidden, false);
+  assert.equal(f.get('afterWeddingTools').hidden, false);
+  assert.equal(f.get('afterWeddingTools').open, false);
 });
 
 test('已修改清點內容時返回清單才詢問，取消後保留表單', async () => {
