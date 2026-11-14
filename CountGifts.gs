@@ -112,7 +112,7 @@ function handleCountApi_(payload, now) {
           if (matches.length !== 1) throw apiError_('BAD_REQUEST', '找不到唯一賓客編號，請先確認名單');
           guest = guestRecordFromRow_(matches[0]);
         }
-        if (input.exceptionType === '多包' && !rows.some(row => canonicalGuestId_(row[1]) === guest.guestId && row[4] !== '已撤銷')) {
+        if (input.exceptionType === '多包' && !rows.some(row => canonicalGuestId_(row[1]) === guest.guestId && !row[15] && row[4] !== '已撤銷')) {
           throw apiError_('BAD_REQUEST', '此賓客尚無第一包收件，請先從接待收件登記');
         }
         // Include reserved codes from unfinished audit operations; never reuse a bag number.

@@ -3,7 +3,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbw7p69vK-OqidULCYMXds6U
 const SESSION_STORAGE_KEY = 'wedding-check-in-session-token';
 const SESSION_EXPIRES_STORAGE_KEY = 'wedding-check-in-session-expires-at';
 const SESSION_OPERATOR_STORAGE_KEY = 'wedding-check-in-session-operator';
-const GUEST_SNAPSHOT_STORAGE_KEY = 'wedding-check-in-guest-snapshot';
+const GUEST_SNAPSHOT_STORAGE_KEY = 'wedding-check-in-guest-snapshot-v2';
 const GIFT_QUEUE_STORAGE_KEY = 'wedding-check-in-gift-queue-v1';
 const DUPLICATE_SCAN_COOLDOWN_MS = 2500;
 const GIFT_QUEUE_RETRY_DELAYS_MS = [3000, 10000, 30000];
@@ -15,6 +15,8 @@ const elements = {
   operatorStatus: document.querySelector('#operatorStatus'),
   reader: document.querySelector('#reader'),
   guestFacts: document.querySelector('#guestFacts'),
+  guestEnvelope: document.querySelector('#guestEnvelope'),
+  guestDetails: document.querySelector('#guestDetails'),
   guestTable: document.querySelector('#guestTable'),
   guestCode: document.querySelector('#guestCode'),
   giftSyncPanel: document.querySelector('#giftSyncPanel'),
@@ -284,8 +286,10 @@ async function openUnlistedGuest() {
   guestEntrySource = 'exception';
   guestReturnFocus = document.querySelector('#unlistedEnvelope');
   shouldResumeScannerAfterGate = false;
-  renderGiftResult({ ok: true, guestId: '', displayName: '名單外／代送紅包',
-    giftState: '例外收件', canCancel: false });
+  selectedGuest = null;
+  elements.guestEnvelope.hidden = elements.guestDetails.hidden = true;
+  openCheckinGate('名單外／代收紅包', '', 'neutral');
+  updateGiftButtons();
   return true;
 }
 
@@ -535,18 +539,18 @@ function renderGiftResult(data) {
     return;
   }
   selectedGuest = applyLocalGiftState({ ...data, guestId: canonicalGuestId(data.guestId) });
+  elements.guestEnvelope.hidden = elements.guestDetails.hidden = false;
   elements.guestTable.textContent = selectedGuest.category || '未填寫';
   elements.guestCode.textContent = selectedGuest.guestId;
   const state = selectedGuest.giftState;
   const shortStatus = {
     '未收件': '尚未收紅包', '待清點': '已登記收紅包', '已清點': '已登記收紅包',
     '待同步': '已保存在這支手機・待同步', '待核對': '紅包收件需核對', '清點待核對': '紅包需核對',
-    '例外收件': '請填紅包署名，取得編號後寫在袋上'
   };
   const needsAttention = ['待核對', '清點待核對'].includes(state);
   const detail = (shortStatus[state] || '紅包：' + state) +
     (needsAttention && selectedGuest.message ? '\n' + selectedGuest.message : '');
-  const tone = ['未收件', '例外收件'].includes(selectedGuest.giftState) ? 'neutral'
+  const tone = selectedGuest.giftState === '未收件' ? 'neutral'
     : ['待同步', '清點待核對'].includes(selectedGuest.giftState) ? 'warn'
       : selectedGuest.giftState === '待核對' ? 'error' : 'success';
   openCheckinGate(selectedGuest.displayName, detail, tone);

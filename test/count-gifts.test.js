@@ -43,7 +43,7 @@ function fixture() {
     } },
     LockService: { getScriptLock: () => ({ tryLock: () => fail !== 'lock', releaseLock() {} }) }
   };
-  vm.runInNewContext(source + '\nthis.api = { handleCountApi_, safeApiCall_, requireGiftSchema_, GIFT_HEADERS, GUEST_HEADERS, GIFT_AUDIT_HEADERS, giftStatus_, giftRecord_ };', context);
+  vm.runInNewContext(source + '\nthis.api = { handleCountApi_, safeApiCall_, createGiftSnapshot_, requireGiftSchema_, GIFT_HEADERS, GUEST_HEADERS, GIFT_AUDIT_HEADERS, giftStatus_, giftRecord_ };', context);
   const api = context.api;
   sheet('Guests', [Array.from(api.GUEST_HEADERS), ['g001', '測試賓客', '男方朋友', '5', '']]);
   sheet('Gifts', [Array.from(api.GIFT_HEADERS),
@@ -128,6 +128,22 @@ test('第二包及名單外各有編號，原收件不被覆蓋，重試不新�
   assert.equal(f.tables.Gifts.data.length, 3);
   assert.equal(f.tables.Gifts.data[1][5], '');
   assert.equal(f.call('countSave', { ...input, guestId: '', exceptionType: '名單外' }, 'request-0002').record.envelopeCode, 'E002');
+});
+
+test('舊版代送關聯賓客的E紅包，在查詢與登入快照中都不改變本人收件狀態', () => {
+  const f = fixture();
+  f.tables.Gifts.data.splice(1);
+  const extra = f.call('receiveExtra', { state: '待清點', exceptionType: '署名不同／代送',
+    guestId: 'g001', signature: '另一位送禮人', amount: '' });
+  assert.equal(extra.record.envelopeCode, 'E001');
+  const query = () => f.api.safeApiCall_({ action: 'guest', guestId: 'PM01', sessionToken: 'valid' }, new Date());
+  assert.equal(query().giftState, '未收件');
+  const snapshot = f.api.createGiftSnapshot_({ getSheetByName: name => f.tables[name] });
+  assert.equal(snapshot.guests[0].giftState, '未收件');
+  assert.throws(() => f.call('countSave', { state: '已清點', exceptionType: '多包',
+    guestId: 'PM01', signature: '家人第二包', amount: '1200' }, 'request-0002'),
+  /尚無第一包/);
+  assert.equal(f.call('countList').records.length, 1);
 });
 
 test('驗證 session、原操作者、requestId 與原內容，不允許竄改後重送', () => {

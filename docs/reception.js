@@ -2,14 +2,14 @@
 (() => {
   const ids = ['partyMembers', 'partyNotes', 'partySize', 'partyAlert', 'guestDetails',
     'receptionPending',
-    'receptionPendingText', 'receptionRetry', 'receptionNotice', 'receptionFeedback', 'checkinModalMessage', 'extraEnvelopePanel',
+    'receptionPendingText', 'receptionRetry', 'receptionNotice', 'receptionFeedback', 'extraEnvelopePanel',
     'extraEnvelopeType', 'extraEnvelopeSignature', 'extraEnvelopeNotes', 'receiveExtraButton', 'unlistedEnvelope'];
   const el = Object.fromEntries(ids.map(id => [id, document.querySelector('#' + id)]));
   const KEY = 'wedding-reception-operation-v1';
-  let pending = null, busy = false, storageAvailable = true, shownGuestId = null;
-  let receiptSaved = false;
+  let pending = null, busy = false, storageAvailable = true;
+  let extraOpen = false, receiptSaved = false;
   const notice = (text, tone = 'warn') => {
-    el.receptionNotice.textContent = text; el.receptionNotice.hidden = !!selectedGuest;
+    el.receptionNotice.textContent = text; el.receptionNotice.hidden = extraOpen;
     el.receptionNotice.dataset.tone = el.receptionFeedback.dataset.tone = tone;
     el.receptionFeedback.textContent = text;
   };
@@ -31,48 +31,44 @@
       : '裝置儲存異常，請使用紙本備援。';
     el.receptionRetry.disabled = busy || !pending;
     const formLocked = busy || !!pending || receiptSaved;
-    el.receiveExtraButton.disabled = formLocked || !storageAvailable || !isBrowserOnline() || !selectedGuest;
+    el.receiveExtraButton.disabled = formLocked || !storageAvailable || !isBrowserOnline() || !extraOpen;
     el.receiveExtraButton.textContent = receiptSaved ? '這包已登記' : '登記這包（不填金額）';
     el.extraEnvelopeType.disabled = el.extraEnvelopeSignature.disabled = el.extraEnvelopeNotes.disabled = formLocked;
     if (typeof updateGiftButtons === 'function') updateGiftButtons();
   }
   function show(guest) {
+    extraOpen = false; receiptSaved = false;
+    el.extraEnvelopePanel.hidden = true;
+    el.extraEnvelopeSignature.value = el.extraEnvelopeNotes.value = '';
+    el.receptionFeedback.textContent = '';
+    if (!pending && storageAvailable) el.receptionNotice.hidden = true;
     if (!guest) {
-      shownGuestId = null; receiptSaved = false;
-      el.partyMembers.textContent = el.partyNotes.textContent = el.receptionFeedback.textContent = '';
+      el.partyMembers.textContent = el.partyNotes.textContent = '';
       el.partySize.textContent = el.partyAlert.textContent = '';
       el.partyAlert.hidden = true; el.guestDetails.open = false;
-      el.extraEnvelopePanel.hidden = true;
-      el.extraEnvelopeSignature.value = el.extraEnvelopeNotes.value = '';
-      if (!pending && storageAvailable) el.receptionNotice.hidden = true;
       controls(); return;
     }
-    const sameGuest = shownGuestId === guest.guestId;
-    shownGuestId = guest.guestId;
-    el.extraEnvelopePanel.hidden = false;
     el.partyMembers.textContent = (guest.members || '') + (guest.partySize ? '\n本組 ' + guest.partySize + ' 人' : '');
     el.partySize.textContent = guest.partySize ? '本組 ' + guest.partySize + ' 人' : '';
-    if (!sameGuest || !receiptSaved) el.partyNotes.textContent = guest.notes || '';
+    el.partyNotes.textContent = guest.notes || '';
     el.partyAlert.textContent = String(guest.notes || '').split(/[；\n]/)
       .filter(note => /兒童椅|嬰兒車|素食|撤.+椅|代領|核對|未確認|未知/.test(note)).join('；');
     el.partyAlert.hidden = !el.partyAlert.textContent;
-    // Background sync can re-render the card while an exception receipt is being entered.
-    if (sameGuest) { controls(); return; }
-    receiptSaved = false;
-    if (!pending && storageAvailable) el.receptionNotice.hidden = true;
-    el.receptionFeedback.textContent = '';
-    el.guestDetails.open = !guest.guestId;
-    el.extraEnvelopePanel.open = false;
-    el.extraEnvelopeType.value = guest.guestId ? '多包' : '名單外';
+    controls();
+  }
+  function open() {
+    show(null);
+    extraOpen = true;
+    el.extraEnvelopePanel.hidden = false;
+    el.extraEnvelopeType.value = '名單外';
     el.extraEnvelopeSignature.value = '';
     el.extraEnvelopeNotes.value = '';
     controls();
   }
   async function receiveExtra(data, label) {
-    if (busy || pending || receiptSaved || !storageAvailable) return;
+    if (!extraOpen || busy || pending || receiptSaved || !storageAvailable) return;
     if (!isBrowserOnline()) { notice('目前離線，請使用紙本備援。'); return; }
-    const guestId = selectedGuest?.guestId || '';
-    const operation = { action: 'receiveExtra', data, guestId, label, apiUrl: getSettings().apiUrl,
+    const operation = { action: 'receiveExtra', data, guestId: '', label, apiUrl: getSettings().apiUrl,
       operator: readSessionOperator(), requestId: createRequestId(), attempts: 0 };
     if (!operation.operator) { notice('請先登入。'); return; }
     if (persist(operation)) await send();
@@ -111,30 +107,25 @@
       if (!persist(null)) throw new Error('伺服器已處理，但本機無法清除待核對操作，請先人工核對');
       const repeated = operation.attempts > 1 || /REPLAY/.test(result.status);
       const code = result.record?.envelopeCode;
-      receiptSaved = operation.guestId === selectedGuest?.guestId;
+      receiptSaved = extraOpen;
       notice('例外紅包已登記。請在這包紅包寫上 ' + code + '，金額回家再清點。' +
         (repeated ? '這是原操作結果，請勿新增第二筆。' : ''), 'success');
-      if (receiptSaved) {
-        el.partyNotes.textContent = '這包紅包標記：' + code;
-        el.checkinModalMessage.textContent = '';
-        el.extraEnvelopePanel.open = false;
-      }
     } catch (err) {
       notice(messageOf(err) + (pending ? '。原操作仍保留，請按「核對原操作結果／重試」，勿重複操作。' : ''));
     } finally { busy = false; controls(); }
   }
   el.receiveExtraButton.addEventListener('click', () => {
-    if (busy || pending || receiptSaved) return;
+    if (!extraOpen || busy || pending || receiptSaved) return;
     const type = el.extraEnvelopeType.value, signature = el.extraEnvelopeSignature.value.trim();
     if (!signature) { notice('請先填紅包署名；無法確認可填「署名待確認」並備註。'); return; }
-    if (type === '多包' && !selectedGuest?.guestId) { notice('第二包請先搜尋原賓客。'); return; }
+    if (!['名單外', '署名不同／代送'].includes(type)) { notice('請選擇名單外或代收紅包。'); return; }
     if (!window.confirm('確認收到另一包實體紅包？取得 E 編號前請將這包單獨放置。')) return;
-    receiveExtra({ guestId: type === '名單外' ? '' : selectedGuest?.guestId || '',
+    receiveExtra({ guestId: '',
       signature, exceptionType: type, state: '待清點', amount: '', notes: el.extraEnvelopeNotes.value.trim() }, '例外紅包：' + signature);
   });
   el.unlistedEnvelope.addEventListener('click', async () => {
     if (!(await openUnlistedGuest())) return;
-    el.extraEnvelopePanel.open = true; el.extraEnvelopeSignature.focus();
+    open(); el.extraEnvelopeSignature.focus();
   });
   el.receptionRetry.addEventListener('click', send);
   window.addEventListener('online', controls); window.addEventListener('offline', controls);
@@ -151,8 +142,8 @@
   } catch (err) { storageAvailable = false; notice('待核對操作無法讀取，請人工核對後再使用。'); }
   function canLeave() {
     const hasDraft = el.extraEnvelopeSignature.value.trim() || el.extraEnvelopeNotes.value.trim();
-    return receiptSaved || !!pending || !hasDraft || window.confirm('這包紅包尚未登記，確定放棄輸入並返回？');
+    return !extraOpen || receiptSaved || !!pending || !hasDraft || window.confirm('這包紅包尚未登記，確定放棄輸入並返回？');
   }
-  window.Reception = { show, isBusy: () => busy, canLeave };
+  window.Reception = { show, open, isBusy: () => busy, canLeave };
   controls();
 })();

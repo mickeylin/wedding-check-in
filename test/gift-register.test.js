@@ -66,6 +66,21 @@ test('另一手機重複收件不覆蓋第一次資料；不同賓客可分別�
   assert.equal(f.records.length, 2);
 });
 
+test('代送 E 編號紅包不代表賓客本人的紅包已收，也不阻擋本人收件', () => {
+  const f = fixture();
+  f.records.push({ guestId: 'G001', receiptId: 'extra', envelopeCode: 'E001',
+    exceptionType: '署名不同／代送', state: '待清點', amount: '' });
+  assert.equal(f.call('guest').giftState, '未收件');
+  const received = f.call('receive');
+  assert.equal(received.status, 'RECEIVED');
+  assert.equal(f.records.length, 2);
+  assert.equal(received.receiptId, f.records[1].receiptId);
+  assert.equal(f.call('receive').status, 'ALREADY_RECEIVED');
+  f.call('cancel', { receiptId: received.receiptId });
+  assert.equal(f.call('guest').giftState, '未收件');
+  assert.equal(f.records[0].state, '待清點');
+});
+
 test('撤銷保留原收件，之後可重新收件；舊請求重試不復活紅包', () => {
   const f = fixture();
   const first = f.call('receive', { requestId: 'original' });

@@ -54,7 +54,7 @@ function giftRecord_(row, rowNumber) {
 }
 
 function giftStatus_(records) {
-  const active = records.filter(record => record.state !== '已撤銷');
+  const active = records.filter(record => !record.envelopeCode && record.state !== '已撤銷');
   if (!active.length) return { giftState: '未收件', receiptId: '', canCancel: false };
   const one = active.length === 1 ? active[0] : null;
   return { giftState: active.some(record => record.state === '待核對') ? '清點待核對'
@@ -136,7 +136,7 @@ function createGiftModule_(deps) {
       if (!guest) throw apiError_('NOT_FOUND', '找不到賓客編號，請用姓名查找或人工處理');
       const execute = () => {
         const records = deps.store.list();
-        const forGuest = () => records.filter(record => record.guestId === input.guestId);
+        const forGuest = () => records.filter(record => record.guestId === input.guestId && !record.envelopeCode);
         const response = (status, message) => Object.assign({ ok: true, status, message,
           guestId: guest.guestId, displayName: guest.displayName, tableNo: guest.tableNo,
           category: guest.category, members: guest.members, partySize: guest.partySize,

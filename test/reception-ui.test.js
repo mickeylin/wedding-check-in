@@ -16,7 +16,7 @@ function fixture({ local = new Map(), online = true, respond, operator = '甲', 
     document: { querySelector: get, createElement: node },
     window: { localStorage: { getItem: k => local.get(k), setItem: (k, v) => local.set(k, v), removeItem: k => local.delete(k) },
       confirm, addEventListener() {} },
-    selectedGuest: { ok: true, guestId: 'G1', members: '成哥、家人', partySize: 3 },
+    selectedGuest: { ok: true, guestId: 'G1', members: '成哥、家人', partySize: 3, giftState: '未收件' },
     getSettings: () => ({ apiUrl: 'https://api.test/exec' }), readSessionOperator: () => operator,
     ensureSession: async () => { if (ensure) ensure(ctx); return true; }, readSessionToken: () => 'token',
     isBrowserOnline: () => online, messageOf: e => e.message, createRequestId: () => 'request-unique',
@@ -26,6 +26,7 @@ function fixture({ local = new Map(), online = true, respond, operator = '甲', 
   vm.runInNewContext(fs.readFileSync('docs/reception.js', 'utf8'), ctx);
   return { ctx, get, local, calls,
     show: async () => { ctx.window.Reception.show(ctx.selectedGuest); await tick(); },
+    open: () => ctx.window.Reception.open(),
     click: async key => { get(key).fire(); await tick(); } };
 }
 test('接待卡顯示同行資訊，掃卡不發送喜餅請求', async () => {
@@ -33,12 +34,17 @@ test('接待卡顯示同行資訊，掃卡不發送喜餅請求', async () => {
   await f.show();
   assert.equal(f.calls.length, 0);
   assert.match(f.get('#partyMembers').textContent, /成哥/);
+  assert.equal(f.get('#extraEnvelopePanel').hidden, true);
+  f.get('#extraEnvelopeType').value = '署名不同／代送';
+  f.get('#extraEnvelopeSignature').value = '代收署名';
+  await f.click('#receiveExtraButton');
+  assert.equal(f.calls.length, 0);
 });
 
 test('例外收件逾時後保留原請求，重新開啟可核對並取得 E 編號', async () => {
   const local = new Map();
   const first = fixture({ local, respond: () => { throw new Error('timeout'); } });
-  await first.show();
+  first.open();
   first.get('#extraEnvelopeSignature').value = '測試署名';
   await first.click('#receiveExtraButton');
   assert.equal(first.get('#receiveExtraButton').disabled, true);
@@ -76,24 +82,24 @@ test('舊發餅待辦不重送，也不阻擋例外紅包收件', async () => {
     const f = fixture({ local });
     assert.equal(local.has(key), false);
     await f.click('#receptionRetry');
-    await f.show();
+    f.open();
     f.get('#extraEnvelopeSignature').value = '測試署名';
     await f.click('#receiveExtraButton');
     assert.deepEqual(f.calls.map(call => call.action), ['receiveExtra']);
   }
 });
-test('第二包由接待登記待清點，金額留白且E編號留在視窗', async () => {
+test('獨立代收不帶入目前賓客ID，金額留白且E編號留在代收視窗', async () => {
   const f = fixture({ respond: r => r.action === 'receiveExtra'
     ? { ok: true, status: 'COUNT_SAVED', record: { envelopeCode: 'E007' } } : { ok: false } });
-  await f.show(); f.get('#extraEnvelopeType').value = '多包'; f.get('#extraEnvelopeSignature').value = '家人';
+  f.open(); f.get('#extraEnvelopeType').value = '署名不同／代送'; f.get('#extraEnvelopeSignature').value = '家人';
   await f.click('#receiveExtraButton'); const data = JSON.parse(f.calls.find(c => c.action === 'receiveExtra').data);
-  assert.equal(data.amount, ''); assert.equal(data.state, '待清點'); assert.equal(data.guestId, 'G1');
+  assert.equal(data.amount, ''); assert.equal(data.state, '待清點'); assert.equal(data.guestId, '');
+  assert.equal(f.calls[0].guestId, '');
+  assert.equal(f.ctx.selectedGuest.giftState, '未收件');
   assert.match(f.get('#receptionFeedback').textContent, /E007/);
   assert.equal(f.get('#receiveExtraButton').disabled, true);
   await f.click('#receiveExtraButton');
   assert.equal(f.calls.length, 1, '同一畫面不能再次登記這包紅包');
-  await f.show();
-  assert.match(f.get('#partyNotes').textContent, /E007/, '背景更新仍保留袋上編號');
   assert.equal(f.ctx.window.Reception.canLeave(), true);
   f.ctx.window.Reception.show(null);
   assert.equal(f.get('#receptionNotice').hidden, true, '返回後清除上一包的成功提示');
@@ -101,19 +107,22 @@ test('第二包由接待登記待清點，金額留白且E編號留在視窗', a
 
 test('返回前確認放棄例外收件草稿，取消後保留署名', async () => {
   const f = fixture({ confirm: () => false });
-  await f.show();
+  f.open();
   f.get('#extraEnvelopeSignature').value = '尚未登記的署名';
   assert.equal(f.ctx.window.Reception.canLeave(), false);
   assert.equal(f.get('#extraEnvelopeSignature').value, '尚未登記的署名');
   assert.equal(f.calls.length, 0);
 });
 
-test('同卡背景紅包同步保留正在輸入的署名，下一位則清除舊資料', async () => {
-  const f = fixture(); await f.show();
-  f.get('#extraEnvelopeSignature').value = '正在填寫';
-  f.ctx.window.Reception.show(f.ctx.selectedGuest);
-  assert.equal(f.get('#extraEnvelopeSignature').value, '正在填寫');
-  assert.equal(f.calls.length, 0);
-  f.ctx.selectedGuest = null; f.ctx.window.Reception.show(null);
-  assert.equal(f.get('#partyMembers').textContent, ''); assert.equal(f.get('#extraEnvelopePanel').hidden, true);
+test('結束代收後賓客頁只顯示本人資訊，沒有上一包E編號或表單', async () => {
+  const f = fixture();
+  f.open();
+  f.get('#extraEnvelopeSignature').value = '家人';
+  await f.click('#receiveExtraButton');
+  f.ctx.window.Reception.show(null);
+  await f.show();
+  assert.equal(f.get('#extraEnvelopePanel').hidden, true);
+  assert.equal(f.get('#receptionFeedback').textContent, '');
+  assert.equal(f.get('#partyNotes').textContent, '');
+  assert.equal(f.get('#receiveExtraButton').disabled, true);
 });
