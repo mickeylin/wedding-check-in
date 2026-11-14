@@ -429,7 +429,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
   outline: 3px solid #376b8b;
   outline-offset: 3px;
 }
-.setup-panel, #resultBox, .sync-panel, .history-panel { grid-column: 1 / -1; }
+.setup-panel, #resultBox, .sync-panel, .history-panel, #receptionOtherTools, #afterWeddingTools,
+#receptionPending, #receptionNotice { grid-column: 1 / -1; }
+#receptionOtherTools button, #afterWeddingTools button { margin-top: 12px; }
 summary { cursor: pointer; font-weight: 700; padding: 6px 0; }
 #settingsHint { color: var(--muted); font-size: 13px; font-weight: normal; margin-left: 8px; }
 .setup-help { margin-top: 12px; font-size: 14px; line-height: 1.6; }
@@ -454,6 +456,7 @@ body.guest-open { overflow: hidden; }
 .mode-switch { display: flex; gap: 8px; }
 .counting-panel > .button-row { margin: 16px 0; }
 #countStatus { white-space: pre-line; padding: 12px 0; overflow-wrap: anywhere; }
+#countStatus:empty { display: none; }
 #countStatus[data-tone="error"] { color: var(--error-ink); }
 #countStatus[data-tone="success"] { color: var(--success-ink); font-weight: bold; }
 #countFields { padding: 0; margin: 16px 0; border: 0; min-width: 0; }
@@ -464,6 +467,8 @@ body.guest-open { overflow: hidden; }
 #countEditor { background: #fff; border: 2px solid var(--line); border-left: 5px solid var(--button); border-radius: 10px; padding: 16px; margin-top: 16px; box-shadow: 0 8px 22px #2f292114; }
 .count-list-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin: 8px 0 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
 .count-list-header h3 { margin: 4px 0 0; }
+.count-list-header .button-row { flex-shrink: 0; }
+.count-list-header button { width: auto; white-space: nowrap; }
 .count-view-kicker { color: var(--muted); font-size: 13px; font-weight: 700; }
 .count-editor-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 12px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
 .count-editor-nav span { color: var(--muted); font-size: 13px; font-weight: 700; }
@@ -483,6 +488,7 @@ textarea { width: 100%; font: inherit; font-size: 16px; border: 1px solid var(--
   .checkin-modal-card { width: 100%; padding: 20px; max-height: calc(100dvh - 20px); }
   .count-list-header { display: block; }
   .count-list-header .button-row { margin-top: 12px; }
+  #countFields .button-row { flex-direction: column; }
 }
 #partyMembers, #partyNotes, #receptionNotice { white-space: pre-line; }
 #partyMembers { font-weight: 600; }
@@ -492,9 +498,11 @@ textarea { width: 100%; font: inherit; font-size: 16px; border: 1px solid var(--
 
 .checkin-modal-card { background: #fff; }
 .checkin-modal-card.success, .checkin-modal-card.warn, .checkin-modal-card.error { background: #fff; }
+.checkin-modal-card.success .guest-envelope { border-left: 3px solid var(--success-ink); padding-left: 12px; }
+.checkin-modal-card.success #checkinModalMessage { color: var(--success-ink); }
 .guest-facts { grid-template-columns: 1fr 1fr; margin: 12px 0; gap: 10px; }
 .guest-facts > div { background: #f5f3ef; padding: 10px 12px; }
-#guestTable { font-size: 34px; line-height: 1.2; }
+#guestTable { font-size: clamp(22px, 6vw, 30px); line-height: 1.3; }
 #guestCode { font-size: 22px; line-height: 1.5; }
 #partySize { display: block; color: var(--muted); font-size: 13px; }
 .guest-envelope { padding: 10px 0 14px; }
@@ -511,3 +519,4 @@ textarea { width: 100%; font: inherit; font-size: 16px; border: 1px solid var(--
 .checkin-modal-card .guest-details button { font-size: 14px; min-height: 44px; margin-top: 8px; }
 .party-alert { font-size: 14px; border-left: 3px solid #c69b32; padding-left: 8px; }
 #receptionFeedback:empty { display: none; }
+#receptionFeedback[data-tone="success"] { background: var(--success); border-color: #b5d8bf; color: var(--success-ink); }

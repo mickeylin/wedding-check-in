@@ -2,7 +2,7 @@
  * device, then sent in the background with one immutable request id. */
 (() => {
   const ids = ['receptionMode', 'countingMode', 'countingPanel', 'receptionScanner', 'receptionLookup', 'unlistedEnvelope',
-    'afterWeddingTools', 'countingTitle', 'countListNav', 'scannerTitle',
+    'afterWeddingTools', 'receptionOtherTools', 'resultBox', 'countingTitle', 'countListNav', 'scannerTitle',
     'countRefresh', 'countException', 'countStatus', 'countRetry', 'countQueueSection', 'countQueueSummary', 'countQueueList',
     'countEditor', 'countEditorTitle', 'countReceiptInfo', 'countFields', 'countGuestGroup', 'countGuestId',
     'countType', 'countSignature', 'countAmount', 'countNotesLabel', 'countNotes', 'countReasonGroup',
@@ -349,9 +349,12 @@
     el.countingPanel.hidden = !counting;
     el.receptionScanner.hidden = counting; el.receptionLookup.hidden = counting;
     el.unlistedEnvelope.hidden = counting;
+    el.receptionOtherTools.hidden = counting;
+    el.receptionOtherTools.open = false;
     el.afterWeddingTools.hidden = counting;
     el.afterWeddingTools.open = false;
     if (counting) {
+      el.resultBox.hidden = true;
       (draft ? el.countEditorTitle : el.countingTitle).focus();
       if (!loaded && !draft) await refresh();
     } else {

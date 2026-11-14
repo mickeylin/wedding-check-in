@@ -207,6 +207,8 @@ test('未修改清點內容時返回清單不跳確認', async () => {
   f.get('afterWeddingTools').open = true;
   await f.fire('countingMode');
   assert.equal(f.get('afterWeddingTools').hidden, true);
+  assert.equal(f.get('receptionOtherTools').hidden, true);
+  assert.equal(f.get('resultBox').hidden, true);
   assert.equal(f.get('countListNav').hidden, false);
   await f.get('countRecords').children[0].handlers.click();
   assert.equal(f.get('countListNav').hidden, true);
@@ -225,6 +227,8 @@ test('未修改清點內容時返回清單不跳確認', async () => {
   assert.equal(f.get('receptionLookup').hidden, false);
   assert.equal(f.get('afterWeddingTools').hidden, false);
   assert.equal(f.get('afterWeddingTools').open, false);
+  assert.equal(f.get('receptionOtherTools').hidden, false);
+  assert.equal(f.get('receptionOtherTools').open, false);
 });
 
 test('已修改清點內容時返回清單才詢問，取消後保留表單', async () => {

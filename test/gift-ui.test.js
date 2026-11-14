@@ -42,17 +42,29 @@ function loadUi(options = {}) {
   return { context, nodes, requests, guest, ui: context.ui, timeoutDelays, appendedScripts };
 }
 
-test('QR 查詢只送 guest；按下一位不新增紅包', async () => {
+test('QR 查詢後顯示返回掃描，返回不新增紅包', async () => {
   const f = loadUi();
   await f.ui.query('G001', { source: 'scanner' });
   assert.equal(f.requests.length, 1);
   assert.equal(f.requests[0].action, 'guest');
   assert.equal(f.nodes.get('#receiveButton').hidden, false);
-  assert.equal(f.nodes.get('#nextGuestButton').textContent, '下一位');
+  assert.equal(f.nodes.get('#nextGuestButton').textContent, '返回掃描');
   assert.equal(f.nodes.get('#guestTable').textContent, '湖畔咖啡');
   await f.ui.next();
   assert.equal(f.requests.length, 1);
   assert.equal(f.nodes.get('#receiveButton').hidden, true);
+});
+
+test('掃碼查詢失敗時也能明確返回掃描', async () => {
+  for (const result of [() => ({ ok: false, message: '找不到賓客' }),
+    () => { throw new Error('連線逾時'); }]) {
+    const f = loadUi();
+    f.context.jsonpRequest = async () => result();
+    await f.ui.query('PMFF', { source: 'scanner' });
+    assert.equal(f.nodes.get('#nextGuestButton').textContent, '返回掃描');
+    await f.ui.next();
+    assert.equal(f.nodes.get('#checkinModal').hidden, true);
+  }
 });
 
 test('舊自訂網址不能覆蓋固定網址或把舊帳本的收件送過去', async () => {
@@ -86,6 +98,7 @@ test('掃描查詢不等待相機 stop，下一位重用串流且手動停止仍
   };
   await f.ui.start();
   await f.ui.query('G001', { source: 'scanner' });
+  assert.equal(f.nodes.get('#nextGuestButton').textContent, '返回掃描');
   assert.equal(stops, 0, '不應在 API 查詢前關閉相機');
   await f.ui.next();
   assert.equal(starts, 1);
@@ -172,7 +185,7 @@ test('手機儲存失敗時不建立假收件，也不隱藏重新收件按鈕',
 
   assert.equal(f.ui.queue().length, 0);
   assert.equal(f.nodes.get('#receiveButton').hidden, false);
-  assert.match(f.nodes.get('#checkinModalMessage').textContent, /沒有安全記錄/);
+  assert.match(f.nodes.get('#checkinModalMessage').textContent, /尚未記錄/);
 });
 
 test('另一支手機已先收件時轉為待核對，不把本機待辦當成同步成功', async () => {

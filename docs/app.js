@@ -64,6 +64,18 @@ elements.cancelReceiptButton.addEventListener('click', () => {
 });
 elements.retryGiftQueueButton.addEventListener('click', retryGiftQueueNow);
 elements.clearCompletedGiftQueueButton.addEventListener('click', clearCompletedGiftQueue);
+
+elements.connectionStatus.addEventListener('click', event => {
+  event.preventDefault();
+  if (!elements.giftSyncPanel.hidden) {
+    elements.queueDetails.open = true;
+    elements.giftSyncPanel.scrollIntoView({ block: 'start' });
+    return;
+  }
+  elements.settingsPanel.open = true;
+  elements.settingsPanel.scrollIntoView({ block: 'start' });
+  (readSessionToken() ? elements.saveSettingsButton : elements.pin).focus();
+});
 elements.giftQueueList.addEventListener('click', event => {
   const button = event.target.closest('[data-resolve-request]');
   if (!button) return;
@@ -253,7 +265,7 @@ async function loadGuest(guestId, operationStarted = Date.now(), sessionMs = 0) 
     renderGiftResult(data);
   } catch (err) {
     recordGiftTiming('查詢失敗', operationStarted, null, sessionMs);
-    const message = messageOf(err) + '。請確認 Apps Script Web App URL 與工作階段設定。';
+    const message = messageOf(err) + '。請確認網路，或重新登入後再試。';
     showResult('API 呼叫失敗', message, 'error');
     addRecent('ERROR', guestId, messageOf(err));
     openCheckinGate('API 呼叫失敗', message, 'error');
@@ -261,6 +273,20 @@ async function loadGuest(guestId, operationStarted = Date.now(), sessionMs = 0) 
     recentGuestIdScanAt.set(guestId, Date.now());
     pruneRecentGuestIds(Date.now());
   }
+}
+
+async function openUnlistedGuest() {
+  if (!checkinGate.begin()) return false;
+  if (!validateSettings() || !(await ensureSession())) {
+    checkinGate.reset();
+    return false;
+  }
+  guestEntrySource = 'exception';
+  guestReturnFocus = document.querySelector('#unlistedEnvelope');
+  shouldResumeScannerAfterGate = false;
+  renderGiftResult({ ok: true, guestId: '', displayName: '名單外／代送紅包',
+    giftState: '例外收件', canCancel: false });
+  return true;
 }
 
 function pruneRecentGuestIds(now) {
@@ -476,7 +502,7 @@ function openCheckinGate(title, message, tone) {
   elements.checkinModalTitle.textContent = title;
   elements.checkinModalMessage.textContent = message || '';
   elements.checkinModal.hidden = false;
-  elements.guestFacts.hidden = !selectedGuest;
+  elements.guestFacts.hidden = !selectedGuest?.guestId;
   document.querySelector('main').inert = true;
   document.querySelector('header').inert = true;
   document.body?.classList?.add('guest-open');
@@ -490,9 +516,9 @@ function updateGiftButtons() {
   elements.receiveButton.disabled = busy;
   elements.cancelReceiptButton.disabled = busy;
   elements.nextGuestButton.disabled = busy;
-  const returnLabels = { lookup: '返回查詢結果', manual: '返回編號查詢' };
+  const returnLabels = { scanner: '返回掃描', lookup: '返回查詢結果', manual: '返回編號查詢' };
   elements.nextGuestButton.textContent = returnLabels[guestEntrySource]
-    || (selectedGuest?.guestId ? '下一位' : '返回現場接待');
+    || '返回現場接待';
   if (!elements.checkinModal.hidden && [elements.receiveButton, elements.cancelReceiptButton]
     .some(button => button.hidden && document.activeElement === button)) {
     elements.nextGuestButton.focus();
@@ -520,7 +546,7 @@ function renderGiftResult(data) {
   const needsAttention = ['待核對', '清點待核對'].includes(state);
   const detail = (shortStatus[state] || '紅包：' + state) +
     (needsAttention && selectedGuest.message ? '\n' + selectedGuest.message : '');
-  const tone = selectedGuest.giftState === '未收件' ? 'neutral'
+  const tone = ['未收件', '例外收件'].includes(selectedGuest.giftState) ? 'neutral'
     : ['待同步', '清點待核對'].includes(selectedGuest.giftState) ? 'warn'
       : selectedGuest.giftState === '待核對' ? 'error' : 'success';
   openCheckinGate(selectedGuest.displayName, detail, tone);
@@ -564,7 +590,7 @@ function queueGiftReceipt(guest) {
   const started = Date.now();
   const settings = getSettings();
   if (!giftQueueStorageAvailable) {
-    openCheckinGate('手機無法保存', '這筆紅包沒有安全記錄，請勿直接處理下一位；請重新整理或改用人工備案。', 'error');
+    openCheckinGate('手機無法保存', '這筆紅包尚未記錄，請先保留這包紅包，重新整理後再試，或改用紙本登記。', 'error');
     return false;
   }
   const queued = giftQueueModel.enqueue(giftQueue, {
@@ -584,7 +610,7 @@ function queueGiftReceipt(guest) {
     return false;
   }
   if (!persistGiftQueue(queued.items)) {
-    openCheckinGate('手機保存失敗', '這筆紅包沒有安全記錄，請勿直接處理下一位；請重新整理或改用人工備案。', 'error');
+    openCheckinGate('手機保存失敗', '這筆紅包尚未記錄，請先保留這包紅包，重新整理後再試，或改用紙本登記。', 'error');
     return false;
   }
 
@@ -607,7 +633,7 @@ function applyLocalGiftState(guest) {
   }
   if (['queued', 'syncing', 'retry_wait', 'needs_login'].includes(item.status)) {
     return { ...guest, giftState: '待同步', canCancel: false,
-      message: queueStatusLabel(item) + '；資料已安全保存在這支手機，可以處理下一位。請確認紅包已寫上賓客編號 ' + guest.guestId + '。' };
+      message: queueStatusLabel(item) + '；資料已保存在這支手機，可以返回繼續接待。請確認紅包已寫上賓客編號 ' + guest.guestId + '。' };
   }
   if (item.status === 'synced') {
     return { ...guest, giftState: guest.giftState === '未收件' ? '待清點' : guest.giftState,
@@ -902,8 +928,10 @@ function recordGiftTiming(label, started, data, sessionMs = 0) {
 
 async function continueToNextGuest() {
   if (giftBusy || (window.Reception && window.Reception.isBusy())) return;
+  if (window.Reception && !window.Reception.canLeave()) return;
   const returnFocus = guestReturnFocus?.isConnected ? guestReturnFocus
-    : guestEntrySource === 'lookup' ? elements.lookupQuery : elements.manualGuestId;
+    : guestEntrySource === 'scanner' ? elements.startButton
+      : guestEntrySource === 'lookup' ? elements.lookupQuery : elements.manualGuestId;
   guestReturnFocus = null;
   guestEntrySource = '';
   selectedGuest = null;
@@ -954,12 +982,10 @@ function renderLookupResults(data) {
     const card = document.createElement('article');
     card.className = 'lookup-card';
     const categoryText = guest.category ? '分類 ' + guest.category : '分類未填寫';
-    const checkInText = '點選查看最新紅包狀態';
     card.innerHTML = [
       '<div class="lookup-card-title">' + escapeHtml(guest.displayName || '未命名賓客') + '</div>',
       '<div class="lookup-card-meta">',
       '<span>' + escapeHtml(categoryText) + '</span>',
-      '<span>' + escapeHtml(checkInText) + '</span>',
       '</div>'
     ].join('');
     const actions = document.createElement('div');
@@ -967,7 +993,7 @@ function renderLookupResults(data) {
     const button = document.createElement('button');
     button.type = 'button';
     button.disabled = !guest.guestId;
-    button.textContent = guest.guestId ? '查看分類／紅包' : '缺少賓客 ID';
+    button.textContent = guest.guestId ? '查看賓客' : '缺少賓客編號';
     button.addEventListener('click', () => {
       queryGuest(guest.guestId, { source: 'lookup', returnFocus: button });
     });
@@ -1003,10 +1029,13 @@ function validateSettings() {
   const settings = getSettings();
   if (!settings.operator) {
     showResult('缺少操作人員', '請填寫操作人員姓名。', 'warn');
+    elements.settingsPanel.open = true;
+    elements.operator.focus();
     return false;
   }
   if (!settings.sessionToken && !settings.pin) {
     showResult('缺少 PIN', '請輸入工作人員 PIN。', 'warn');
+    elements.pin.focus();
     return false;
   }
   return true;
@@ -1154,6 +1183,7 @@ function updateConnectionStatus() {
   const loggedIn = !!readSessionToken();
   elements.operatorStatus.textContent = loggedIn ? readSessionOperator() + '・已登入' : '尚未登入';
   elements.settingsHint.textContent = loggedIn ? '已登入・需要更新名單時展開' : '請登入下載名單';
+  elements.connectionStatus.href = elements.giftSyncPanel.hidden ? '#settingsTitle' : '#syncTitle';
   if (!giftQueueStorageAvailable) {
     elements.connectionStatus.textContent = '手機儲存異常';
     return;

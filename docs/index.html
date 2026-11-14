@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>婚禮接待</title>
-  <link rel="stylesheet" href="./styles.css?v=e666cb872ce0">
+  <link rel="stylesheet" href="./styles.css?v=772db1dc6f64">
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 </head>
 <body>
@@ -13,7 +13,7 @@
       <h1>婚禮接待</h1>
       <p>查分類・收紅包</p>
     </div>
-    <div class="header-status"><span id="operatorStatus"></span><a id="connectionStatus" class="status-pill" href="#syncTitle">尚未登入</a></div>
+    <div class="header-status"><span id="operatorStatus"></span><a id="connectionStatus" class="status-pill" href="#settingsTitle">尚未登入</a></div>
   </header>
 
   <main class="layout">
@@ -36,7 +36,6 @@
       <button type="button" id="receptionRetry">核對原操作結果／重試</button>
     </section>
     <section class="panel" id="receptionNotice" hidden aria-live="polite"></section>
-    <button id="unlistedEnvelope" type="button" class="secondary-button">名單外／代送紅包</button>
     <section id="countingPanel" class="panel counting-panel" aria-labelledby="countingTitle" hidden>
       <div id="countListNav" class="section-header">
         <button id="receptionMode" type="button" class="secondary-button compact-button">← 返回現場接待</button>
@@ -114,7 +113,7 @@
         <h2 id="scannerTitle" tabindex="-1">掃 QR ／輸入編號</h2>
         <div class="button-row">
           <button id="startButton" type="button">開始掃描</button>
-          <button id="stopButton" class="secondary-button" type="button" disabled>停止</button>
+          <button id="stopButton" class="secondary-button" type="button" disabled>停止掃描</button>
         </div>
       </div>
 
@@ -143,14 +142,6 @@
         <label for="lookupCategory">分類</label>
         <select id="lookupCategory">
           <option value="">全部分類</option>
-          <option value="男方家人">男方家人</option>
-          <option value="男方朋友">男方朋友（含共同朋友）</option>
-          <option value="共同朋友">共同朋友</option>
-          <option value="男方同事">男方同事</option>
-          <option value="女方家人">女方家人</option>
-          <option value="女方媽媽同事">女方媽媽同事</option>
-          <option value="女方朋友">女方朋友（含共同朋友）</option>
-          <option value="女方同事">女方同事</option>
         </select>
 
         <button type="submit">查找賓客</button>
@@ -173,6 +164,10 @@
       <button id="clearCompletedGiftQueueButton" class="secondary-button" type="button" hidden>清除完成紀錄</button>
     </section>
     <details class="panel history-panel" hidden><summary>最近操作</summary><ol id="recentList" class="recent-list"></ol></details>
+    <details class="panel" id="receptionOtherTools">
+      <summary>其他紅包收件</summary>
+      <button id="unlistedEnvelope" type="button" class="secondary-button">名單外／代送紅包</button>
+    </details>
     <details class="panel" id="afterWeddingTools">
       <summary>婚宴後使用</summary>
       <button id="countingMode" type="button" class="secondary-button">回家清點紅包</button>
@@ -200,7 +195,6 @@
         <p id="checkinModalMessage" role="status" aria-live="polite"></p>
         <button id="receiveButton" type="button" hidden>收到紅包</button>
       </section>
-      <button id="nextGuestButton" class="secondary-button" type="button">下一位</button>
       <details id="guestDetails" class="guest-details">
         <summary>詳情與其他操作</summary>
         <h3>同行與備註</h3><p id="partyMembers"></p><p id="partyNotes"></p>
@@ -214,6 +208,7 @@
           <button id="receiveExtraButton" type="button" class="secondary-button">登記這包（不填金額）</button>
         </details>
       </details>
+      <button id="nextGuestButton" class="secondary-button" type="button">返回現場接待</button>
       <details class="timing-details" hidden>
         <summary>查看本次耗時</summary>
         <p id="timingStatus">尚無量測資料</p>
@@ -224,9 +219,9 @@
   <!-- Update the content-hash version when changing each local asset. -->
   <script src="./checkin-gate.js?v=5bdec7e233a6"></script>
   <script src="./gift-queue.js?v=610add030021"></script>
-  <script src="./app.js?v=70660812f830"></script>
+  <script src="./app.js?v=bde1d28c4ec1"></script>
   <script src="./count-queue.js?v=e9c5a9cff383"></script>
-  <script src="./counting.js?v=cc8cb92a37c1"></script>
-  <script src="./reception.js?v=568744af8c2d"></script>
+  <script src="./counting.js?v=4e393c56709d"></script>
+  <script src="./reception.js?v=f44e56543591"></script>
 </body>
 </html>

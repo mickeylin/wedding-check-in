@@ -3,11 +3,11 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const test = require('node:test');
 const tick = () => new Promise(resolve => setImmediate(resolve));
-function fixture({ local = new Map(), online = true, respond, operator = '甲', ensure } = {}) {
+function fixture({ local = new Map(), online = true, respond, operator = '甲', ensure, confirm = () => true } = {}) {
   const nodes = new Map(), calls = [];
   function node() {
     const handlers = {};
-    return { value: '', textContent: '', hidden: false, disabled: false, children: [],
+    return { value: '', textContent: '', hidden: false, disabled: false, children: [], dataset: {},
       addEventListener: (event, fn) => { handlers[event] = fn; }, fire() { return handlers.click?.(); },
       append(child) { this.children.push(child); }, replaceChildren() { this.children = []; }, focus() {} };
   }
@@ -15,7 +15,7 @@ function fixture({ local = new Map(), online = true, respond, operator = '甲', 
   const ctx = {
     document: { querySelector: get, createElement: node },
     window: { localStorage: { getItem: k => local.get(k), setItem: (k, v) => local.set(k, v), removeItem: k => local.delete(k) },
-      confirm: () => true, addEventListener() {} },
+      confirm, addEventListener() {} },
     selectedGuest: { ok: true, guestId: 'G1', members: '成哥、家人', partySize: 3 },
     getSettings: () => ({ apiUrl: 'https://api.test/exec' }), readSessionOperator: () => operator,
     ensureSession: async () => { if (ensure) ensure(ctx); return true; }, readSessionToken: () => 'token',
@@ -89,6 +89,23 @@ test('第二包由接待登記待清點，金額留白且E編號留在視窗', a
   await f.click('#receiveExtraButton'); const data = JSON.parse(f.calls.find(c => c.action === 'receiveExtra').data);
   assert.equal(data.amount, ''); assert.equal(data.state, '待清點'); assert.equal(data.guestId, 'G1');
   assert.match(f.get('#receptionFeedback').textContent, /E007/);
+  assert.equal(f.get('#receiveExtraButton').disabled, true);
+  await f.click('#receiveExtraButton');
+  assert.equal(f.calls.length, 1, '同一畫面不能再次登記這包紅包');
+  await f.show();
+  assert.match(f.get('#partyNotes').textContent, /E007/, '背景更新仍保留袋上編號');
+  assert.equal(f.ctx.window.Reception.canLeave(), true);
+  f.ctx.window.Reception.show(null);
+  assert.equal(f.get('#receptionNotice').hidden, true, '返回後清除上一包的成功提示');
+});
+
+test('返回前確認放棄例外收件草稿，取消後保留署名', async () => {
+  const f = fixture({ confirm: () => false });
+  await f.show();
+  f.get('#extraEnvelopeSignature').value = '尚未登記的署名';
+  assert.equal(f.ctx.window.Reception.canLeave(), false);
+  assert.equal(f.get('#extraEnvelopeSignature').value, '尚未登記的署名');
+  assert.equal(f.calls.length, 0);
 });
 
 test('同卡背景紅包同步保留正在輸入的署名，下一位則清除舊資料', async () => {
